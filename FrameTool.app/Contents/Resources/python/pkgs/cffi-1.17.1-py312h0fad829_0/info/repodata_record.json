@@ -1,0 +1,26 @@
+{
+    "arch": "arm64",
+    "build": "py312h0fad829_0",
+    "build_number": 0,
+    "channel": "conda-forge",
+    "depends": [
+        "__osx >=11.0",
+        "libffi >=3.4,<4.0a0",
+        "pycparser",
+        "python >=3.12,<3.13.0a0",
+        "python >=3.12,<3.13.0a0 *_cpython",
+        "python_abi 3.12.* *_cp312"
+    ],
+    "fn": "cffi-1.17.1-py312h0fad829_0.conda",
+    "license": "MIT",
+    "license_family": "MIT",
+    "md5": "19a5456f72f505881ba493979777b24e",
+    "name": "cffi",
+    "platform": "osx",
+    "sha256": "8d91a0d01358b5c3f20297c6c536c5d24ccd3e0c2ddd37f9d0593d0f0070226f",
+    "size": 281206,
+    "subdir": "osx-arm64",
+    "timestamp": 1725560813378,
+    "url": "https://conda.anaconda.org/conda-forge/osx-arm64/cffi-1.17.1-py312h0fad829_0.conda",
+    "version": "1.17.1"
+}

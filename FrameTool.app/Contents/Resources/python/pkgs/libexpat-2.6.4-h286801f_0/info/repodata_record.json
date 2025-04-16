@@ -1,0 +1,24 @@
+{
+    "arch": "arm64",
+    "build": "h286801f_0",
+    "build_number": 0,
+    "channel": "conda-forge",
+    "constrains": [
+        "expat 2.6.4.*"
+    ],
+    "depends": [
+        "__osx >=11.0"
+    ],
+    "fn": "libexpat-2.6.4-h286801f_0.conda",
+    "license": "MIT",
+    "license_family": "MIT",
+    "md5": "38d2656dd914feb0cab8c629370768bf",
+    "name": "libexpat",
+    "platform": "osx",
+    "sha256": "e42ab5ace927ee7c84e3f0f7d813671e1cf3529f5f06ee5899606630498c2745",
+    "size": 64693,
+    "subdir": "osx-arm64",
+    "timestamp": 1730967175868,
+    "url": "https://conda.anaconda.org/conda-forge/osx-arm64/libexpat-2.6.4-h286801f_0.conda",
+    "version": "2.6.4"
+}

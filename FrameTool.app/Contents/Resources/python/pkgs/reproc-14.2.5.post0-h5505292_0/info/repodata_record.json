@@ -1,0 +1,21 @@
+{
+    "arch": "arm64",
+    "build": "h5505292_0",
+    "build_number": 0,
+    "channel": "conda-forge",
+    "depends": [
+        "__osx >=11.0"
+    ],
+    "fn": "reproc-14.2.5.post0-h5505292_0.conda",
+    "license": "MIT",
+    "license_family": "MIT",
+    "md5": "f1d129089830365d9dac932c4dd8c675",
+    "name": "reproc",
+    "platform": "osx",
+    "sha256": "a5f0dbfa8099a3d3c281ea21932b6359775fd8ce89acc53877a6ee06f50642bc",
+    "size": 32023,
+    "subdir": "osx-arm64",
+    "timestamp": 1731926255834,
+    "url": "https://conda.anaconda.org/conda-forge/osx-arm64/reproc-14.2.5.post0-h5505292_0.conda",
+    "version": "14.2.5.post0"
+}

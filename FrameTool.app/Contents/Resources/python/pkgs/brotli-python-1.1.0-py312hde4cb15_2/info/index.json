@@ -1,0 +1,21 @@
+{
+  "arch": "arm64",
+  "build": "py312hde4cb15_2",
+  "build_number": 2,
+  "constrains": [
+    "libbrotlicommon 1.1.0 hd74edd7_2"
+  ],
+  "depends": [
+    "__osx >=11.0",
+    "libcxx >=17",
+    "python >=3.12,<3.13.0a0",
+    "python >=3.12,<3.13.0a0 *_cpython",
+    "python_abi 3.12.* *_cp312"
+  ],
+  "license": "MIT",
+  "name": "brotli-python",
+  "platform": "osx",
+  "subdir": "osx-arm64",
+  "timestamp": 1725268143995,
+  "version": "1.1.0"
+}

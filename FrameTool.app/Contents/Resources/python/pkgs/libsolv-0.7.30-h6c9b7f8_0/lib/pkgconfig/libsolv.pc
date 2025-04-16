@@ -1,0 +1,8 @@
+libdir=/Users/runner/miniforge3/conda-bld/libsolv-split_1720790015109/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_place/lib
+includedir=/Users/runner/miniforge3/conda-bld/libsolv-split_1720790015109/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_place/include
+
+Name: libsolv
+Description: Library for solving packages
+Version: 0.7.30
+Libs: -L${libdir} -lsolv
+Cflags: -I${includedir}

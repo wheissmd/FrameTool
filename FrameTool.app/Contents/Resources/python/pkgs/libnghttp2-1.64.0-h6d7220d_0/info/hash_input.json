@@ -1,0 +1,16 @@
+{
+  "cxx_compiler": "clangxx",
+  "libev": "4.33",
+  "zlib": "1",
+  "c_compiler": "clang",
+  "CONDA_BUILD_SYSROOT": "/Applications/Xcode_15.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX11.0.sdk",
+  "c_stdlib_version": "11.0",
+  "openssl": "3",
+  "target_platform": "osx-arm64",
+  "c_ares": "1",
+  "cxx_compiler_version": "17",
+  "c_stdlib": "macosx_deployment_target",
+  "channel_targets": "conda-forge main",
+  "c_compiler_version": "17",
+  "__osx": "__osx >=11.0"
+}

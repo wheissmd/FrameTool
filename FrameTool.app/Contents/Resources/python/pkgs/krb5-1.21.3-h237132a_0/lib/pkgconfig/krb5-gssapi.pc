@@ -1,0 +1,10 @@
+prefix=/Users/runner/miniforge3/conda-bld/krb5_1719462984750/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_plac
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+vendor=MIT
+
+Name: krb5-gssapi
+Description: Kerberos implementation of the GSSAPI
+Version: 1.21.3
+Requires: mit-krb5-gssapi

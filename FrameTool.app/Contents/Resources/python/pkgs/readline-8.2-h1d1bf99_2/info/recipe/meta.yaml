@@ -1,0 +1,80 @@
+# This file created by conda-build 25.1.2
+# meta.yaml template originally from:
+# /Users/runner/work/1/s/recipe, last modified Mon Feb 24 06:40:09 2025
+# ------------------------------------------------
+
+package:
+  name: readline
+  version: '8.2'
+source:
+  patches:
+    - 0001-Readline-8.2-patch-1-fix-crash-when-readline-is-star.patch
+  sha256: 3feb7171f16a84ee82ca18a36d7b9be109a52c04f492a053331d7d1095007c35
+  url: https://ftp.gnu.org/gnu/readline/readline-8.2.tar.gz
+build:
+  number: '2'
+  run_exports:
+    - readline >=8.2,<9.0a0
+  string: h1d1bf99_2
+requirements:
+  build:
+    - ca-certificates 2025.1.31 h8857fd0_0
+    - cctools_osx-64 1010.6 hd19c6af_3
+    - cctools_osx-arm64 1010.6 hd9414f1_3
+    - clang 18.1.8 default_h576c50e_7
+    - clang-18 18.1.8 default_h3571c67_7
+    - clang_impl_osx-arm64 18.1.8 hadf8e89_23
+    - clang_osx-arm64 18.1.8 h1728699_23
+    - clangxx 18.1.8 default_heb2e8d1_7
+    - compiler-rt 18.1.8 h1020d70_1
+    - compiler-rt_osx-64 18.1.8 hf2b8a54_1
+    - ld64_osx-64 951.9 h33512f0_3
+    - ld64_osx-arm64 951.9 h0ae773b_3
+    - libclang-cpp18.1 18.1.8 default_h3571c67_7
+    - libcxx 19.1.7 hf95d169_0
+    - libcxx-devel 18.1.8 h7c275be_7
+    - libiconv 1.18 h4b5e92a_1
+    - libllvm18 18.1.8 hc29ff6c_3
+    - liblzma 5.6.4 hd471939_0
+    - libtool 2.4.7 hf036a51_1
+    - libxml2 2.13.6 he8ee3e7_0
+    - libzlib 1.3.1 hd23fc13_2
+    - llvm-tools 18.1.8 hc29ff6c_3
+    - llvm-tools-18 18.1.8 hc29ff6c_3
+    - make 4.4.1 h00291cd_2
+    - ncurses 6.5 h0622a9a_3
+    - openssl 3.4.1 hc426f3f_0
+    - pkg-config 0.29.2 hf7e621a_1009
+    - sigtool 0.1.3 h88f4db0_0
+    - tapi 1300.6.5 h390ca13_0
+    - zstd 1.5.7 h8210216_1
+  host:
+    - ncurses 6.5 h5e97a16_3
+  run:
+    - ncurses >=6.5,<7.0a0
+test:
+  commands:
+    - test ! -f ${PREFIX}/lib/libreadline.a
+    - test -f ${PREFIX}/lib/libreadline${SHLIB_EXT}
+    - test ! -f ${PREFIX}/lib/libhistory.a
+    - test -f ${PREFIX}/lib/libhistory${SHLIB_EXT}
+about:
+  home: https://cnswww.cns.cwru.edu/php/chet/readline/rltop.html
+  license: GPL-3.0-only
+  license_file: COPYING
+  summary: library for editing command lines as they are typed in
+extra:
+  copy_test_source_files: true
+  final: true
+  flow_run_id: azure_20250224.1.1
+  recipe-maintainers:
+    - asmeurer
+    - croth1
+    - jakirkham
+    - mingwandroid
+    - msarahan
+    - msarahan
+    - ocefpaf
+    - pelson
+  remote_url: https://github.com/conda-forge/readline-feedstock
+  sha: cd132ac0c32cf8198763e2075ec2f363ae3d987c

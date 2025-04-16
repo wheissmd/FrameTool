@@ -1,0 +1,16 @@
+{
+  "arch": "arm64",
+  "build": "py312h81bd7bf_1",
+  "build_number": 1,
+  "depends": [
+    "python >=3.12,<3.13.0a0",
+    "python >=3.12,<3.13.0a0 *_cpython",
+    "python_abi 3.12.* *_cp312"
+  ],
+  "license": "BSD-3-Clause",
+  "name": "jsonpointer",
+  "platform": "osx",
+  "subdir": "osx-arm64",
+  "timestamp": 1725303130815,
+  "version": "3.0.0"
+}

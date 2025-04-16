@@ -1,0 +1,42 @@
+{
+    "arch": "arm64",
+    "build": "h39f12f2_0",
+    "build_number": 0,
+    "channel": "conda-forge",
+    "depends": [
+        "__osx >=11.0"
+    ],
+    "extracted_package_dir": "/Users/denisvays/miniforge3/pkgs/liblzma-5.6.4-h39f12f2_0",
+    "files": [
+        "lib/liblzma.5.dylib"
+    ],
+    "fn": "liblzma-5.6.4-h39f12f2_0.conda",
+    "license": "0BSD",
+    "link": {
+        "source": "/Users/denisvays/miniforge3/pkgs/liblzma-5.6.4-h39f12f2_0",
+        "type": 1
+    },
+    "md5": "e3fd1f8320a100f2b210e690a57cd615",
+    "name": "liblzma",
+    "package_tarball_full_path": "/Users/denisvays/miniforge3/pkgs/liblzma-5.6.4-h39f12f2_0.tar.bz2",
+    "paths_data": {
+        "paths": [
+            {
+                "_path": "lib/liblzma.5.dylib",
+                "path_type": "hardlink",
+                "sha256": "35d245fe6c152c9ea06524f7de0c7f340a253edb391909449ab9dc5ef1eed0b5",
+                "sha256_in_prefix": "35d245fe6c152c9ea06524f7de0c7f340a253edb391909449ab9dc5ef1eed0b5",
+                "size_in_bytes": 200768
+            }
+        ],
+        "paths_version": 1
+    },
+    "platform": "osx",
+    "requested_spec": "conda-forge/osx-arm64::liblzma==5.6.4=h39f12f2_0[md5=e3fd1f8320a100f2b210e690a57cd615]",
+    "sha256": "560c59d3834cc652a84fb45531bd335ad06e271b34ebc216e380a89798fe8e2c",
+    "size": 98945,
+    "subdir": "osx-arm64",
+    "timestamp": 1738525462560,
+    "url": "https://conda.anaconda.org/conda-forge/osx-arm64/liblzma-5.6.4-h39f12f2_0.conda",
+    "version": "5.6.4"
+}

@@ -1,0 +1,15 @@
+{
+  "arch": "arm64",
+  "build": "h286801f_1",
+  "build_number": 1,
+  "depends": [
+    "__osx >=11.0",
+    "libcxx >=18"
+  ],
+  "license": "BSD-2-Clause",
+  "name": "lz4-c",
+  "platform": "osx",
+  "subdir": "osx-arm64",
+  "timestamp": 1733741047892,
+  "version": "1.10.0"
+}

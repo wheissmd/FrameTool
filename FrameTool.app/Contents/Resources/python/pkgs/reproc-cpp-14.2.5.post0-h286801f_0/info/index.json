@@ -1,0 +1,16 @@
+{
+  "arch": "arm64",
+  "build": "h286801f_0",
+  "build_number": 0,
+  "depends": [
+    "__osx >=11.0",
+    "libcxx >=18",
+    "reproc 14.2.5.post0 h5505292_0"
+  ],
+  "license": "MIT",
+  "name": "reproc-cpp",
+  "platform": "osx",
+  "subdir": "osx-arm64",
+  "timestamp": 1731926355120,
+  "version": "14.2.5.post0"
+}

@@ -1,0 +1,13 @@
+{
+  "arch": "arm64",
+  "build": "h93a5062_1001",
+  "build_number": 1001,
+  "depends": [],
+  "license": "GPL-2.0-or-later",
+  "license_family": "GPL2",
+  "name": "lzo",
+  "platform": "osx",
+  "subdir": "osx-arm64",
+  "timestamp": 1713516009610,
+  "version": "2.10"
+}

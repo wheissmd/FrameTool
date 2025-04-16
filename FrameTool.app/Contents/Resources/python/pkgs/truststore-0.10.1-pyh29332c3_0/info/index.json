@@ -1,0 +1,14 @@
+{
+  "build": "pyh29332c3_0",
+  "build_number": 0,
+  "depends": [
+    "python >=3.10",
+    "python"
+  ],
+  "license": "MIT",
+  "name": "truststore",
+  "noarch": "python",
+  "subdir": "noarch",
+  "timestamp": 1739009763560,
+  "version": "0.10.1"
+}

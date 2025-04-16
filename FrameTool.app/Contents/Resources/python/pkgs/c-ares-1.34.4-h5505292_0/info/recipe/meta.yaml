@@ -1,0 +1,70 @@
+# This file created by conda-build 24.11.2
+# meta.yaml template originally from:
+# /Users/runner/work/1/s/recipe, last modified Sat Dec 14 20:26:11 2024
+# ------------------------------------------------
+
+package:
+  name: c-ares
+  version: 1.34.4
+source:
+  sha256: fa38dbed659ee4cc5a32df5e27deda575fa6852c79a72ba1af85de35a6ae222f
+  url: https://github.com/c-ares/c-ares/releases/download/v1.34.4/c-ares-1.34.4.tar.gz
+build:
+  number: '0'
+  run_exports:
+    - c-ares >=1.34.4,<2.0a0
+  string: h5505292_0
+requirements:
+  build:
+    - ca-certificates 2024.8.30 h8857fd0_0
+    - cctools_osx-64 1010.6 h00edd4c_2
+    - cctools_osx-arm64 1010.6 h71f0a72_2
+    - clang 18.1.8 default_h179603d_5
+    - clang-18 18.1.8 default_h0c94c6a_5
+    - clang_impl_osx-arm64 18.1.8 hadf8e89_23
+    - clang_osx-arm64 18.1.8 h1728699_23
+    - clangxx 18.1.8 default_h179603d_5
+    - cmake-no-system 3.31.1 hbcac03e_0
+    - compiler-rt 18.1.8 h1020d70_1
+    - compiler-rt_osx-64 18.1.8 hf2b8a54_1
+    - ld64_osx-64 951.9 hc8d1a19_2
+    - ld64_osx-arm64 951.9 h148c8d5_2
+    - libclang-cpp18.1 18.1.8 default_h0c94c6a_5
+    - libcxx 19.1.5 hf95d169_0
+    - libcxx-devel 18.1.8 h7c275be_7
+    - libiconv 1.17 hd75f5a5_2
+    - libllvm18 18.1.8 h9ce406d_2
+    - liblzma 5.6.3 hd471939_1
+    - libxml2 2.13.5 he8ee3e7_1
+    - libzlib 1.3.1 hd23fc13_2
+    - llvm-tools 18.1.8 h9ce406d_2
+    - llvm-tools-18 18.1.8 h9ce406d_2
+    - macosx_deployment_target_osx-arm64 11.0 h6553868_2
+    - ncurses 6.5 hf036a51_1
+    - ninja 1.12.1 h3c5361c_0
+    - openssl 3.4.0 hd471939_0
+    - sigtool 0.1.3 h88f4db0_0
+    - tapi 1300.6.5 h390ca13_0
+    - zstd 1.5.6 h915ae27_0
+  host:
+    - __osx >=11.0
+  run:
+    - __osx >=11.0
+  run_constraint:
+    - c-ares-static <0a0
+about:
+  home: https://c-ares.haxx.se/
+  license: MIT
+  license_family: MIT
+  license_file: LICENSE.md
+  summary: This is c-ares, an asynchronous resolver library
+extra:
+  copy_test_source_files: true
+  final: true
+  flow_run_id: azure_20241214.2.1
+  recipe-maintainers:
+    - ocefpaf
+    - wesm
+    - xhochy
+  remote_url: https://github.com/conda-forge/c-ares-feedstock
+  sha: 08ac1d7ae15a21e1fd5370c07bed655c301a1013

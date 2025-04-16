@@ -1,0 +1,16 @@
+{
+  "arch": "arm64",
+  "build": "5_cp312",
+  "build_number": 5,
+  "constrains": [
+    "python 3.12.* *_cpython"
+  ],
+  "depends": [],
+  "license": "BSD-3-Clause",
+  "license_family": "BSD",
+  "name": "python_abi",
+  "platform": "osx",
+  "subdir": "osx-arm64",
+  "timestamp": 1723823099686,
+  "version": "3.12"
+}

@@ -1,0 +1,18 @@
+{
+  "arch": "arm64",
+  "build": "h237132a_0",
+  "build_number": 0,
+  "depends": [
+    "__osx >=11.0",
+    "libcxx >=16",
+    "libedit >=3.1.20191231,<3.2.0a0",
+    "libedit >=3.1.20191231,<4.0a0",
+    "openssl >=3.3.1,<4.0a0"
+  ],
+  "license": "MIT",
+  "name": "krb5",
+  "platform": "osx",
+  "subdir": "osx-arm64",
+  "timestamp": 1719463474401,
+  "version": "1.21.3"
+}

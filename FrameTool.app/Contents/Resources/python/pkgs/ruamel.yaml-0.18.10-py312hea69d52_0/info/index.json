@@ -1,0 +1,18 @@
+{
+  "arch": "arm64",
+  "build": "py312hea69d52_0",
+  "build_number": 0,
+  "depends": [
+    "__osx >=11.0",
+    "python >=3.12,<3.13.0a0",
+    "python >=3.12,<3.13.0a0 *_cpython",
+    "python_abi 3.12.* *_cp312",
+    "ruamel.yaml.clib >=0.1.2"
+  ],
+  "license": "MIT",
+  "name": "ruamel.yaml",
+  "platform": "osx",
+  "subdir": "osx-arm64",
+  "timestamp": 1736248245357,
+  "version": "0.18.10"
+}

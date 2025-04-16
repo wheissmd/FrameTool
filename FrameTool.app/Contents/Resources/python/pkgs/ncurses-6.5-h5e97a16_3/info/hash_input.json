@@ -1,0 +1,14 @@
+{
+  "CONDA_BUILD_SYSROOT": "/Applications/Xcode_15.2.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX11.0.sdk",
+  "c_compiler_version": "18",
+  "channel_targets": "conda-forge main",
+  "target_platform": "osx-arm64",
+  "c_stdlib_version": "11.0",
+  "cxx_compiler": "clang_bootstrap",
+  "ncurses": "6",
+  "cxx_compiler_version": "18",
+  "build_platform": "osx-64",
+  "c_stdlib": "macosx_deployment_target",
+  "c_compiler": "clang_bootstrap",
+  "__osx": "__osx >=11.0"
+}

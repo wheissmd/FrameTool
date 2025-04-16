@@ -1,0 +1,107 @@
+# This file created by conda-build 24.11.2
+# ------------------------------------------------
+
+package:
+  name: libarchive
+  version: 3.7.7
+source:
+  patches:
+    - patches/0001-Add-lib-to-CMAKE_FIND_LIBRARY_PREFIXES-for-lzma.patch
+  sha256: fa62384995e8aa4f5a901c184fb5c91e56a29e24c05b6881a7f8fd5bbea694d2
+  url: https://github.com/libarchive/libarchive/archive/v3.7.7.tar.gz
+build:
+  number: 3
+  run_exports:
+    - libarchive >=3.7.7,<3.8.0a0
+  string: h3b16cec_3
+requirements:
+  build:
+    - autoconf 2.71 pl5321hed12c24_1
+    - automake 1.17 pl5321h694c41f_0
+    - ca-certificates 2024.8.30 h8857fd0_0
+    - cctools_osx-64 1010.6 h00edd4c_2
+    - cctools_osx-arm64 1010.6 h71f0a72_2
+    - clang 18.1.8 default_h179603d_5
+    - clang-18 18.1.8 default_h0c94c6a_5
+    - clang_impl_osx-arm64 18.1.8 hadf8e89_23
+    - clang_osx-arm64 18.1.8 h1728699_23
+    - clangxx 18.1.8 default_h179603d_5
+    - compiler-rt 18.1.8 h1020d70_1
+    - compiler-rt_osx-64 18.1.8 hf2b8a54_1
+    - ld64_osx-64 951.9 hc8d1a19_2
+    - ld64_osx-arm64 951.9 h148c8d5_2
+    - libclang-cpp18.1 18.1.8 default_h0c94c6a_5
+    - libcxx 19.1.5 hf95d169_0
+    - libcxx-devel 18.1.8 h7c275be_7
+    - libiconv 1.17 hd75f5a5_2
+    - libllvm18 18.1.8 h9ce406d_2
+    - liblzma 5.6.3 hd471939_1
+    - libtool 2.4.7 hf036a51_1
+    - libxml2 2.13.5 he8ee3e7_1
+    - libzlib 1.3.1 hd23fc13_2
+    - llvm-tools 18.1.8 h9ce406d_2
+    - llvm-tools-18 18.1.8 h9ce406d_2
+    - m4 1.4.18 haf1e3a3_1001
+    - macosx_deployment_target_osx-arm64 11.0 h6553868_2
+    - make 4.4.1 h00291cd_2
+    - ncurses 6.5 hf036a51_1
+    - openssl 3.4.0 hd471939_0
+    - perl 5.32.1 7_h10d778d_perl5
+    - pkg-config 0.29.2 hf7e621a_1009
+    - sigtool 0.1.3 h88f4db0_0
+    - tapi 1300.6.5 h390ca13_0
+    - zstd 1.5.6 h915ae27_0
+  host:
+    - bzip2 1.0.8 h99b78c6_7
+    - ca-certificates 2024.8.30 hf0a4a13_0
+    - icu 75.1 hfee45f7_0
+    - libcxx 19.1.5 ha82da77_0
+    - libiconv 1.17 h0d3ecfb_2
+    - liblzma 5.6.3 h39f12f2_1
+    - liblzma-devel 5.6.3 h39f12f2_1
+    - libxml2 2.13.5 h178c5d8_1
+    - libzlib 1.3.1 h8359307_2
+    - lz4-c 1.10.0 h286801f_1
+    - lzo 2.10 h93a5062_1001
+    - openssl 3.4.0 h39f12f2_0
+    - zlib 1.3.1 h8359307_2
+    - zstd 1.5.6 hb46c0d2_0
+  run:
+    - __osx >=11.0
+    - bzip2 >=1.0.8,<2.0a0
+    - libiconv >=1.17,<2.0a0
+    - liblzma >=5.6.3,<6.0a0
+    - libxml2 >=2.13.5,<3.0a0
+    - libzlib >=1.3.1,<2.0a0
+    - lz4-c >=1.10.0,<1.11.0a0
+    - lzo >=2.10,<3.0a0
+    - openssl >=3.4.0,<4.0a0
+    - zstd >=1.5.6,<1.6.0a0
+test:
+  commands:
+    - test -f "${PREFIX}/lib/pkgconfig/libarchive.pc"
+    - test -f "${PREFIX}/include/archive.h"
+    - test -f "${PREFIX}/include/archive_entry.h"
+    - test -f "${PREFIX}/lib/libarchive.a"
+    - test -f "${PREFIX}/lib/libarchive${SHLIB_EXT}"
+    - bsdcat --version
+    - bsdcpio --version
+    - bsdtar --version
+    - bsdtar -tf test/hello_world.xar
+  files:
+    - test/hello_world.xar
+about:
+  home: http://www.libarchive.org/
+  license: BSD-2-Clause
+  license_family: BSD
+  license_file: COPYING
+  summary: Multi-format archive and compression library
+extra:
+  copy_test_source_files: true
+  final: true
+  flow_run_id: azure_20241212.2.1
+  recipe-maintainers:
+    - jakirkham
+    - ocefpaf
+  remote_url: https://github.com/conda-forge/libarchive-feedstock
+  sha: bdbe7cea9304c9418f5e0442e98ce43321491aa7

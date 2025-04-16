@@ -1,0 +1,43 @@
+context:
+  name: truststore
+  version: "0.10.1"
+  python_min: "3.10"
+
+package:
+  name: truststore
+  version: ${{ version }}
+
+source:
+  url: https://pypi.org/packages/source/${{ name[0] }}/${{ name }}/truststore-${{ version }}.tar.gz
+  sha256: eda021616b59021812e800fa0a071e51b266721bef3ce092db8a699e21c63539
+
+build:
+  noarch: python
+  script: ${{ PYTHON }} -m pip install . -vv
+  number: 0
+
+requirements:
+  host:
+    - python >=${{ python_min }}
+    - flit-core >=3.2,<4
+    - pip
+  run:
+    - python >=${{ python_min }}
+
+tests:
+  - python:
+      imports: 
+        - truststore
+      python_version: "${{ python_min }}.*"
+
+about:
+  homepage: https://github.com/sethmlarson/truststore
+  summary: Verify certificates using native system trust stores
+  repository: https://github.com/sethmlarson/truststore
+  documentation: https://truststore.readthedocs.io/en/latest/
+  license: MIT
+  license_file: LICENSE
+
+extra:
+  recipe-maintainers:
+    - wolfv

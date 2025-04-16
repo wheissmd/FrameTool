@@ -1,0 +1,8 @@
+{
+  "actions" : {
+    "build" : {
+      "enabled" : true,
+      "script" : "\/opt\/homebrew\/bin\/python3 analyze_frametime.py; read -n 1 -s -r -p \"Press any key to continue...\""
+    }
+  }
+}

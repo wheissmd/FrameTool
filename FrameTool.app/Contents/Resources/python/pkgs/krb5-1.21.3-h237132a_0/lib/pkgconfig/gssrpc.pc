@@ -1,0 +1,12 @@
+prefix=/Users/runner/miniforge3/conda-bld/krb5_1719462984750/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_plac
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+vendor=MIT
+
+Name: gssrpc
+Description: GSSAPI RPC implementation
+Version: 1.21.3
+Cflags: -I${includedir}
+Libs: -L${libdir} -lgssrpc
+Requires.private: mit-krb5-gssapi

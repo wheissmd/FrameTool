@@ -1,0 +1,18 @@
+{
+  "arch": null,
+  "build": "pyh8b19718_0",
+  "build_number": 0,
+  "depends": [
+    "python >=3.9,<3.13.0a0",
+    "setuptools",
+    "wheel"
+  ],
+  "license": "MIT",
+  "license_family": "MIT",
+  "name": "pip",
+  "noarch": "python",
+  "platform": null,
+  "subdir": "noarch",
+  "timestamp": 1739142857253,
+  "version": "25.0.1"
+}

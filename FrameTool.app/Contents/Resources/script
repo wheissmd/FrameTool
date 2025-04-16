@@ -1,0 +1,13 @@
+#!/bin/bash
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PYTHON_BIN="$SCRIPT_DIR/python/bin/python3"
+PYTHON_SCRIPT="$SCRIPT_DIR/analyze_frametime.py"
+
+
+if [ -z "$1" ]; then
+  echo "❌ No video file provided."
+  exit 1
+fi
+
+"$PYTHON_BIN" "$PYTHON_SCRIPT" "$1"

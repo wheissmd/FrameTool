@@ -1,0 +1,109 @@
+{
+  "paths": [
+    {
+      "_path": "bin/lz4",
+      "path_type": "hardlink",
+      "sha256": "65783fc5ea56e4932329d1f9a23f9354335ddf997728a76db4dab0e8e137ab50",
+      "size_in_bytes": 285264
+    },
+    {
+      "_path": "bin/lz4c",
+      "path_type": "softlink",
+      "sha256": "65783fc5ea56e4932329d1f9a23f9354335ddf997728a76db4dab0e8e137ab50",
+      "size_in_bytes": 285264
+    },
+    {
+      "_path": "bin/lz4cat",
+      "path_type": "softlink",
+      "sha256": "65783fc5ea56e4932329d1f9a23f9354335ddf997728a76db4dab0e8e137ab50",
+      "size_in_bytes": 285264
+    },
+    {
+      "_path": "bin/unlz4",
+      "path_type": "softlink",
+      "sha256": "65783fc5ea56e4932329d1f9a23f9354335ddf997728a76db4dab0e8e137ab50",
+      "size_in_bytes": 285264
+    },
+    {
+      "_path": "include/lz4.h",
+      "path_type": "hardlink",
+      "sha256": "26b82efc53d1570f3b54eef02e9c4764c1ad374ff03cac04e2ced5ea4d4c552f",
+      "size_in_bytes": 46014
+    },
+    {
+      "_path": "include/lz4file.h",
+      "path_type": "hardlink",
+      "sha256": "400ed90bc74324abcf338d37235dd81aa431fd815c22db4b369b88c12b213115",
+      "size_in_bytes": 3317
+    },
+    {
+      "_path": "include/lz4frame.h",
+      "path_type": "hardlink",
+      "sha256": "b845db4b7ee1bfa64b8f641a94f62e7f636a8b5d673cc61766413782283aaad1",
+      "size_in_bytes": 36085
+    },
+    {
+      "_path": "include/lz4frame_static.h",
+      "path_type": "hardlink",
+      "sha256": "31ab72a6e97e4fa0bedd4420d24a3f1f8024cbfa1d8ffad88c87cbb4e04f769d",
+      "size_in_bytes": 2044
+    },
+    {
+      "_path": "include/lz4hc.h",
+      "path_type": "hardlink",
+      "sha256": "e43824e8a9ba16f54100c4ccbccfa5782a858ca9ab83c48aac303fea3e76e21e",
+      "size_in_bytes": 20308
+    },
+    {
+      "_path": "lib/liblz4.1.10.0.dylib",
+      "path_type": "hardlink",
+      "sha256": "71c112374273de8e9095dbc8b0f0aaa4e64de31af3472c9e3bc68504d42f528f",
+      "size_in_bytes": 209168
+    },
+    {
+      "_path": "lib/liblz4.1.dylib",
+      "path_type": "softlink",
+      "sha256": "71c112374273de8e9095dbc8b0f0aaa4e64de31af3472c9e3bc68504d42f528f",
+      "size_in_bytes": 209168
+    },
+    {
+      "_path": "lib/liblz4.dylib",
+      "path_type": "softlink",
+      "sha256": "71c112374273de8e9095dbc8b0f0aaa4e64de31af3472c9e3bc68504d42f528f",
+      "size_in_bytes": 209168
+    },
+    {
+      "_path": "lib/pkgconfig/liblz4.pc",
+      "file_mode": "text",
+      "path_type": "hardlink",
+      "prefix_placeholder": "/Users/runner/miniforge3/conda-bld/lz4-c_1733740889581/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_pla",
+      "sha256": "a6caf2a81a32743f0b4c77d86c1a75e1b99af3a0bf3b379ae568578ea04431c6",
+      "size_in_bytes": 641
+    },
+    {
+      "_path": "share/man/man1/lz4.1",
+      "path_type": "hardlink",
+      "sha256": "84e711b1283c2b79f5c5d225ed3dbe70a516e0b6bdda5279f395bd3d12ea7d19",
+      "size_in_bytes": 10666
+    },
+    {
+      "_path": "share/man/man1/lz4c.1",
+      "path_type": "softlink",
+      "sha256": "84e711b1283c2b79f5c5d225ed3dbe70a516e0b6bdda5279f395bd3d12ea7d19",
+      "size_in_bytes": 10666
+    },
+    {
+      "_path": "share/man/man1/lz4cat.1",
+      "path_type": "softlink",
+      "sha256": "84e711b1283c2b79f5c5d225ed3dbe70a516e0b6bdda5279f395bd3d12ea7d19",
+      "size_in_bytes": 10666
+    },
+    {
+      "_path": "share/man/man1/unlz4.1",
+      "path_type": "softlink",
+      "sha256": "84e711b1283c2b79f5c5d225ed3dbe70a516e0b6bdda5279f395bd3d12ea7d19",
+      "size_in_bytes": 10666
+    }
+  ],
+  "paths_version": 1
+}

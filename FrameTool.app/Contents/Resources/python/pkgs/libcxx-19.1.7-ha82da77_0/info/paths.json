@@ -1,0 +1,35 @@
+{
+  "paths": [
+    {
+      "_path": "lib/libc++.1.0.dylib",
+      "path_type": "hardlink",
+      "sha256": "5917947ca40dbd0613e564e56b3ca8c4a68a4a0718de4c4d80c7f92ceba4509e",
+      "size_in_bytes": 1082064
+    },
+    {
+      "_path": "lib/libc++.1.dylib",
+      "path_type": "softlink",
+      "sha256": "5917947ca40dbd0613e564e56b3ca8c4a68a4a0718de4c4d80c7f92ceba4509e",
+      "size_in_bytes": 1082064
+    },
+    {
+      "_path": "lib/libc++.a",
+      "path_type": "hardlink",
+      "sha256": "6197dd7f265b02549234cf389b8aab1180471d2cb4e35ded04d7cd5f3291ba24",
+      "size_in_bytes": 1534376
+    },
+    {
+      "_path": "lib/libc++.dylib",
+      "path_type": "softlink",
+      "sha256": "5917947ca40dbd0613e564e56b3ca8c4a68a4a0718de4c4d80c7f92ceba4509e",
+      "size_in_bytes": 1082064
+    },
+    {
+      "_path": "lib/libc++experimental.a",
+      "path_type": "hardlink",
+      "sha256": "f1745dbad9af78dc116e012d913ae1217433336efaebd1ed2e998889586d7edc",
+      "size_in_bytes": 311872
+    }
+  ],
+  "paths_version": 1
+}

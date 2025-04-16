@@ -1,0 +1,22 @@
+{
+    "arch": "arm64",
+    "build": "py312h81bd7bf_0",
+    "build_number": 0,
+    "channel": "conda-forge",
+    "depends": [
+        "python >=3.12,<3.13.0a0",
+        "python >=3.12,<3.13.0a0 *_cpython",
+        "python_abi 3.12.* *_cp312"
+    ],
+    "fn": "menuinst-2.2.0-py312h81bd7bf_0.conda",
+    "license": "BSD-3-Clause AND MIT",
+    "md5": "4ecad32f75f4ad25268e38778cac2b7f",
+    "name": "menuinst",
+    "platform": "osx",
+    "sha256": "b1def1d581bfd96473e854712ce77fe039835ea5c80d9a5033b0d2d2d14cdf0c",
+    "size": 166659,
+    "subdir": "osx-arm64",
+    "timestamp": 1731147206286,
+    "url": "https://conda.anaconda.org/conda-forge/osx-arm64/menuinst-2.2.0-py312h81bd7bf_0.conda",
+    "version": "2.2.0"
+}

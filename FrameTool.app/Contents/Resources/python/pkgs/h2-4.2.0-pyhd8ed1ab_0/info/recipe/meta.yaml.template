@@ -1,0 +1,46 @@
+{% set name = "h2" %}
+{% set version = "4.2.0" %}
+{% set sha256 = "c8a52129695e88b1a0578d8d2cc6842bbd79128ac685463b887ee278126ad01f" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  fn: {{ name }}-{{ version }}.tar.gz
+  url: https://pypi.org/packages/source/{{ name[0] }}/{{ name }}/{{ name }}-{{ version }}.tar.gz
+  sha256: {{ sha256 }}
+
+build:
+  noarch: python
+  number: 0
+  script: {{ PYTHON }} -m pip install . --no-deps -vv
+
+requirements:
+  host:
+    - python {{ python_min }}
+    - setuptools
+    - pip
+  run:
+    - python >={{ python_min }}
+    - hyperframe    >=6.1,<7
+    - hpack         >=4.1,<5
+
+test:
+  requires:
+    - python {{ python_min }}
+  imports:
+    - h2
+
+about:
+  home: http://python-hyper.org/h2/
+  license: MIT
+  license_family: MIT
+  license_file: LICENSE
+  summary: HTTP/2 State-Machine based protocol implementation
+  dev_url: https://github.com/python-hyper/hyper-h2
+
+extra:
+  recipe-maintainers:
+    - primozgodec
+    - wiphoo

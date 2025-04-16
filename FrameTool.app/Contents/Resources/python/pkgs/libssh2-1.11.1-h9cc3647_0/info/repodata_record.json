@@ -1,0 +1,22 @@
+{
+    "arch": "arm64",
+    "build": "h9cc3647_0",
+    "build_number": 0,
+    "channel": "conda-forge",
+    "depends": [
+        "libzlib >=1.3.1,<2.0a0",
+        "openssl >=3.4.0,<4.0a0"
+    ],
+    "fn": "libssh2-1.11.1-h9cc3647_0.conda",
+    "license": "BSD-3-Clause",
+    "license_family": "BSD",
+    "md5": "ddc7194676c285513706e5fc64f214d7",
+    "name": "libssh2",
+    "platform": "osx",
+    "sha256": "f7047c6ed44bcaeb04432e8c74da87591940d091b0a3940c0d884b7faa8062e9",
+    "size": 279028,
+    "subdir": "osx-arm64",
+    "timestamp": 1732349599461,
+    "url": "https://conda.anaconda.org/conda-forge/osx-arm64/libssh2-1.11.1-h9cc3647_0.conda",
+    "version": "1.11.1"
+}
