@@ -17,7 +17,12 @@ The app calculates:
 
 These calculations are based solely on the **shortest and longest time a frame was displayed**, and do **not reflect internal engine behavior**. As such, FrameTool's readings do **not directly compare to** tools like MSI Afterburner or Fraps.
 
-### Usage
+### Installation and Usage
+Installation of the app:
+1. Open DMG
+2. Drag the app to the application folder
+3. Run Remove_Quarantine (double-click)
+
 Using FrameTool is simple:
 1. Launch the app
 2. Set up csv output location (defaults to user/Documents)
