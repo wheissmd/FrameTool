@@ -20,9 +20,10 @@ These calculations are based solely on the **shortest and longest time a frame w
 ### Usage
 Using FrameTool is simple:
 1. Launch the app
-2. Select a video file from the popup window
-3. Wait for the analysis to complete
-4. Once done, you can drag and drop another video to analyze
+2. Set up csv output location (defaults to user/Documents)
+3. Drop a video file to a drag and drop section
+4. Wait for the analysis to complete
+5. Once done, you can drag and drop another video to analyze
 
 A test sample video is provided within the `.dmg` installer to demonstrate how the tool works.
 
@@ -35,7 +36,8 @@ A test sample video is provided within the `.dmg` installer to demonstrate how t
 ## System Requirements
 
 - Currently supports **Apple Silicon Macs only**
-- **16GB RAM recommended**, especially for longer videos (due to frame preloading and multithreaded processing)
+- **16GB RAM recommended**, especially for longer videos and when utilizing mutlithreading
+- macOS Sequoia 15.1 or newer (for v0.0.2, v0.0.1 might work on earlier OS versions)
 
 The FrameTool is built in **pure Python**, so it may be possible to run it on **Intel-based Macs** by:
 - Installing an Intel-compatible standalone Python build within the app's directory
@@ -80,7 +82,7 @@ See `LICENSE.md` for full details.
 ## Credits
 
 - Built with assistance from **ChatGPT (OpenAI)**  
-- Packaged using **Platypus**: https://sveinbjorn.org/platypus  
+- Packaged using xcode, UI is designed using SwiftUI 
 - Developed in **Python**, using:
   - `opencv-python`
   - `numpy`
