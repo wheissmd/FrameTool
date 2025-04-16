@@ -1,7 +1,7 @@
 #!/bin/bash
 
 APP_RESOURCES="$(dirname "$0")"
-PYTHON_BIN="$APP_RESOURCES/venv/bin/python3"
+PYTHON_BIN="$APP_RESOURCES/python/bin/python3"
 PYTHON_SCRIPT="$APP_RESOURCES/analyze_frametime.py"
 
 if [ -z "$1" ]; then
@@ -9,4 +9,4 @@ if [ -z "$1" ]; then
 	exit 1
 fi
 
-"$PYTHON_BIN" "$PYTHON_SCRIPT" "$1"
+"$PYTHON_BIN" "$PYTHON_SCRIPT" "$1" "$2" "$3"
