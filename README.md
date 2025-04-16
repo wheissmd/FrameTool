@@ -24,9 +24,9 @@ Using FrameTool is simple:
 3. Wait for the analysis to complete
 4. Once done, you can drag and drop another video to analyze
 
-> ⚠️ **Note:** Analysis can take a significant amount of time, especially for videos longer than 2 minutes or on lower-end machines.
-
 A test sample video is provided within the `.dmg` installer to demonstrate how the tool works.
+
+> ⚠️ **Note:** Analysis can take a significant amount of time, especially for videos longer than 2 minutes or on lower-end machines.
 
 > ⚠️ **Important:** The analyzed video must be free of screen tearing. Any tearing will cause the app to falsely detect new frames. Additionally, the app does **not** report FPS values higher than the framerate the video was recorded at.
 
