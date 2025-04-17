@@ -34,7 +34,7 @@ A test sample video is provided within the `.dmg` installer to demonstrate how t
 
 > ⚠️ **Note:** Analysis can take a significant amount of time, especially for videos longer than 2 minutes or on lower-end machines.
 
-> ⚠️ **Important:** The analyzed video must be free of screen tearing. Any tearing will cause the app to falsely detect new frames. Additionally, the app does **not** report FPS values higher than the framerate the video was recorded at.
+> ⚠️ **Important:** The analyzed video must be free of screen tearing. Any tearing will cause the app to falsely detect new frames. Poor bitrate of the video might also result to falsely detect new frames, it is not recommended to process the videos recorded on Intel Arc by its own codec (AMD and Nvidia is fine as long as its reasonable bitrate). Additionally, the app does **not** report FPS values higher than the framerate the video was recorded at.
 
 ---
 
