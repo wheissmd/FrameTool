@@ -1,6 +1,6 @@
 # Changelog
 
-## early-prototype [0.0.2] - 2025-04-16
+## early-prototype [0.0.2] - 2025-04-17
 ### Added
 - Toggle for enabling/disabling multithreading
 - Option to choose custom csv export path
