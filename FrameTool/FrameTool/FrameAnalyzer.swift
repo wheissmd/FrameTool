@@ -13,13 +13,16 @@ public struct FrameAnalyzer {
         ///   - videoPath: path to the input video file
         ///   - outputPath: folder to write the CSV output
         ///   - isMultithreading: whether to analyze using multiple CPU threads
-    public static func runAnalysis(videoPath: String, outputPath: String, isMultithreading: Bool) -> String {
+    public static func runAnalysis(videoPath: String, outputPath: String, isMultithreading: Bool, reportStats: Bool, statsMode: String) -> String {
+
             var outputLog = ""
             func log(_ msg: String) {
                 outputLog += msg + "\n"
                 print(msg)  // Also output to Xcode console
             }
 
+            let finalOutputPath: String = outputPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.path : outputPath
+        
             // Load video file from given path
             let videoURL = URL(fileURLWithPath: videoPath)
             let asset = AVAsset(url: videoURL)
@@ -193,39 +196,94 @@ public struct FrameAnalyzer {
             log("📊 Max FPS: \(String(format: "%.2f", maxFPS))")
 
             // Write results to CSV file
-            let csvRows = frameTimes.map {
-                "\($0.0),\(String(format: "%.3f", $0.1)),\($0.2 ? 1 : 0),\(String(format: "%.3f", $0.3))"
+        // Write results to CSV file
+                var csvLines: [String] = []
+                var statBlock: [String] = []
+
+                if reportStats {
+                    let avgStr = String(format: "%.4f", avgFPS)
+                    let minStr = String(format: "%.0f", minFPS)
+                    let maxStr = String(format: "%.0f", maxFPS)
+
+                    if statsMode == "General" {
+                        statBlock.append("Avg FPS: \(avgStr), Min FPS: \(minStr), Max FPS: \(maxStr)")
+                    } else if statsMode == "Detailed" {
+                        let longest = validTimes.max() ?? 0
+                        let longestMs = longest * 1000.0
+                        let longestCount = validTimes.filter { abs($0 - longest) < 0.0001 }.count
+                        let longestPercent = Double(longestCount) / Double(validTimes.count) * 100
+                        let sorted = validTimes.sorted(by: >)
+                        let onePercentIndex = max(Int(Double(validTimes.count) * 0.01) - 1, 0)
+                        let longestOnePercent = sorted[onePercentIndex]
+                        let longestOnePercentMs = longestOnePercent * 1000.0
+                        let minFpsOnePercent = 1.0 / longestOnePercent
+
+                        statBlock.append("Avg FPS, \(avgStr)")
+                        statBlock.append("Min FPS, \(minStr)")
+                        statBlock.append("Max FPS, \(maxStr)")
+                        statBlock.append("The longest frame, \(String(format: "%.4f", longestMs))ms")
+                        statBlock.append("The % of \(Int(longestMs))ms frames, \(String(format: "%.1f", longestPercent))")
+                        statBlock.append("The frame time that 1% of the frames are equal to or longer, \(String(format: "%.4f", longestOnePercentMs))ms, Corresponding to 1% Min FPS, \(String(format: "%.2f", minFpsOnePercent))")
+
+                    }
+                }
+
+                let csvRows = frameTimes.map {
+                    let timestampMs = $0.1 * 1000.0
+                    let deltaMs = $0.3 * 1000.0
+                    return "\(String(format: "%d", $0.0)),\(String(format: "%.4f", timestampMs)),\($0.2 ? 1 : 0),\(String(format: "%.4f", deltaMs))"
+                }
+
+                // Save statistics to a separate file if needed
+                if reportStats {
+                    let statsFileURL = URL(fileURLWithPath: finalOutputPath).appendingPathComponent("frametime_stats.csv")
+
+                    let statsContent = statBlock.joined(separator: "\n")
+                    print("DEBUG: Saving stats to \(statsFileURL.path)")
+
+                    do {
+                        try statsContent.write(to: statsFileURL, atomically: true, encoding: .utf8)
+                    } catch {
+                        print("⚠️ Error saving stats CSV: \(error.localizedDescription)")
+                    }
+                }
+
+
+                // Save main frametime table
+                csvLines.append("frame_index,timestamp (ms),is_change,delta (ms)")
+                csvLines.append(contentsOf: csvRows)
+
+
+                let csvContent = csvLines.joined(separator: "\n")
+                let outputURL = URL(fileURLWithPath: finalOutputPath).appendingPathComponent("frametime_output.csv")
+                try? csvContent.write(to: outputURL, atomically: true, encoding: .utf8)
+
+                log("✅ Saved output to \(outputURL.path)")
+                log("📁 Using video file: \(videoPath)")
+                log("⚠️ WARNING: This is the early prototype version, it’s full of bugs and provides false positives if fed with video full of screen tearing!")
+
+                return outputLog
             }
-            let csvContent = (["frame_index,timestamp,is_change,delta"] + csvRows).joined(separator: "\n")
-            let outputURL = URL(fileURLWithPath: outputPath).appendingPathComponent("frametime_output.csv")
-            try? csvContent.write(to: outputURL, atomically: true, encoding: .utf8)
 
-            log("✅ Saved output to \(outputURL.path)")
-            log("📁 Using video file: \(videoPath)")
-            log("⚠️ WARNING: This is the early prototype version, it’s full of bugs and provides false positives if fed with video full of screen tearing!")
+            /// Calculates mean squared error (MSE) between two grayscale images
+            static func mseVImage(_ img1: vImage_Buffer, _ img2: vImage_Buffer) -> Double {
+                guard img1.width == img2.width && img1.height == img2.height else {
+                    return Double.infinity
+                }
 
-            return outputLog
-        }
+                let pixelCount = Int(img1.width * img1.height)
+                var float1 = [Float](repeating: 0, count: pixelCount)
+                var float2 = [Float](repeating: 0, count: pixelCount)
+                var diffSquared = [Float](repeating: 0, count: pixelCount)
 
-        /// Calculates mean squared error (MSE) between two grayscale images
-        static func mseVImage(_ img1: vImage_Buffer, _ img2: vImage_Buffer) -> Double {
-            guard img1.width == img2.width && img1.height == img2.height else {
-                return Double.infinity
+                vDSP_vfltu8(img1.data.assumingMemoryBound(to: UInt8.self), 1, &float1, 1, vDSP_Length(pixelCount))
+                vDSP_vfltu8(img2.data.assumingMemoryBound(to: UInt8.self), 1, &float2, 1, vDSP_Length(pixelCount))
+                vDSP_vsub(float2, 1, float1, 1, &diffSquared, 1, vDSP_Length(pixelCount))
+                vDSP_vsq(diffSquared, 1, &diffSquared, 1, vDSP_Length(pixelCount))
+
+                var mse: Float = 0
+                vDSP_meanv(diffSquared, 1, &mse, vDSP_Length(pixelCount))
+
+                return Double(mse)
             }
-
-            let pixelCount = Int(img1.width * img1.height)
-            var float1 = [Float](repeating: 0, count: pixelCount)
-            var float2 = [Float](repeating: 0, count: pixelCount)
-            var diffSquared = [Float](repeating: 0, count: pixelCount)
-
-            vDSP_vfltu8(img1.data.assumingMemoryBound(to: UInt8.self), 1, &float1, 1, vDSP_Length(pixelCount))
-            vDSP_vfltu8(img2.data.assumingMemoryBound(to: UInt8.self), 1, &float2, 1, vDSP_Length(pixelCount))
-            vDSP_vsub(float2, 1, float1, 1, &diffSquared, 1, vDSP_Length(pixelCount))
-            vDSP_vsq(diffSquared, 1, &diffSquared, 1, vDSP_Length(pixelCount))
-
-            var mse: Float = 0
-            vDSP_meanv(diffSquared, 1, &mse, vDSP_Length(pixelCount))
-
-            return Double(mse)
         }
-    }

@@ -1,6 +1,0 @@
-{
-  "zlib": "1",
-  "channel_targets": "conda-forge main",
-  "target_platform": "osx-arm64",
-  "openssl": "3"
-}

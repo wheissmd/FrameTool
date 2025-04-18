@@ -1,9 +1,0 @@
-libdir=/Users/runner/miniforge3/conda-bld/libsolv-split_1720790015109/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_place/lib
-includedir=/Users/runner/miniforge3/conda-bld/libsolv-split_1720790015109/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_place/include
-
-Name: libsolvext
-Description: Library for reading repositories
-Version: 0.7.30
-Requires: libsolv
-Libs: -L${libdir} -lsolvext
-Cflags: -I${includedir}

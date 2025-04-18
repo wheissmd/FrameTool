@@ -1,4 +1,0 @@
-- python:
-    imports:
-    - truststore
-    python_version: 3.10.*

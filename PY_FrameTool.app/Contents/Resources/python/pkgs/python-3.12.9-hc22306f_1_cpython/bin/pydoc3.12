@@ -1,5 +1,0 @@
-#!/Users/runner/miniforge3/conda-bld/python-split_1741127369102/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placeh/bin/python3.12
-
-import pydoc
-if __name__ == '__main__':
-    pydoc.cli()

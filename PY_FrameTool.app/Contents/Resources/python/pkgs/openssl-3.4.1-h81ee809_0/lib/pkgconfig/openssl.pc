@@ -1,9 +1,0 @@
-prefix=/Users/runner/miniforge3/conda-bld/openssl_split_1739300901696/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_place
-exec_prefix=${prefix}
-libdir=${exec_prefix}/lib
-includedir=${prefix}/include 
-
-Name: OpenSSL
-Description: Secure Sockets Layer and cryptography libraries and tools
-Version: 3.4.1
-Requires: libssl libcrypto

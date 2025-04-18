@@ -1,7 +1,0 @@
-#!/Users/runner/miniforge3/conda-bld/conda_1736460303265/_h_env_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_placehold_pla/bin/python
-# -*- coding: utf-8 -*-
-import sys
-
-if __name__ == '__main__':
-    from conda_env.cli.main import main
-    sys.exit(main())
