@@ -6,6 +6,7 @@
 import AVFoundation
 import CoreImage
 import Accelerate
+import ZIPFoundation
 
 public struct FrameAnalyzer {
     /// Main method to analyze frame timings in a video.
@@ -231,42 +232,40 @@ public struct FrameAnalyzer {
                 
                 //Export Table and Inject data via Apple Script
                 if exportGraph && graphType == "Interactive" {
-                    let graphTemplatePath = Bundle.main.path(forResource: "GraphTemplate", ofType: "numbers")!
-                    let destinationPath = URL(fileURLWithPath: finalOutputPath).appendingPathComponent("frametime_graph.numbers").path
-                    let scriptPath = Bundle.main.path(forResource: "InjectValuesForGraph", ofType: "scpt")!
-
-                    // Prepare raw injection data for script
-                    let frameDataRows = frameTimes
-                        .filter { $0.3 > 0 }
-                        .map {
-                            let timestamp = String(format: "%.4f", $0.1)
-                            let frametime = String(format: "%.4f", $0.3 * 1000.0)
-                            return "\(timestamp),\(frametime)"
-                        }.joined(separator: "\n")
+                    let fileManager = FileManager.default
+                    let templatePath = Bundle.main.path(forResource: "GraphTemplate", ofType: "xlsx")!
+                    let destinationPath = URL(fileURLWithPath: finalOutputPath).appendingPathComponent("frametime_graph.xlsx").path
 
                     do {
-                        // Copy the .numbers template to output location
-                        try FileManager.default.copyItem(atPath: graphTemplatePath, toPath: destinationPath)
+                        // Copy template to destination
+                        if fileManager.fileExists(atPath: destinationPath) {
+                            try fileManager.removeItem(atPath: destinationPath)
+                        }
+                        try fileManager.copyItem(atPath: templatePath, toPath: destinationPath)
                         log("📄 Graph template copied to \(destinationPath)")
 
-                        // Call AppleScript with data
-                        let task = Process()
-                        task.launchPath = "/usr/bin/osascript"
-                        task.arguments = [scriptPath, destinationPath, destinationPath, frameDataRows]
+                        // Inject data using CSV-style prep (we'll update this with CoreXLSX or a minimal writer soon)
+                        let frameDataRows = frameTimes
+                            .filter { $0.3 > 0 }
+                            .enumerated()
+                            .map { (idx, frame) in
+                                let rowIndex = idx + 3 // Start at row 3
+                                let frametime = String(format: "%.4f", frame.3 * 1000.0) // ms
+                                let timestamp = String(format: "%.4f", frame.1) // sec
+                                return (rowIndex, frametime, timestamp)
+                            }
 
-                        let pipe = Pipe()
-                        task.standardOutput = pipe
-                        task.standardError = pipe
+                        let xlsxWriter = SimpleXLSXEditor(filePath: destinationPath)
+                        for (row, frametime, timestamp) in frameDataRows {
+                            xlsxWriter.writeRow(rowIndex: row, values: [frametime, timestamp])
+                        }
 
-                        task.launch()
-                        task.waitUntilExit()
+                        xlsxWriter.save(to: destinationPath)
 
-                        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                        let output = String(data: data, encoding: .utf8) ?? ""
-                        log("📈 AppleScript executed: \(output)")
+                        log("📈 Graph data injected into Excel sheet")
 
                     } catch {
-                        log("⚠️ Error during graph generation: \(error.localizedDescription)")
+                        log("⚠️ Error generating Excel graph: \(error.localizedDescription)")
                     }
                 }
 
@@ -332,3 +331,82 @@ public struct FrameAnalyzer {
                 return Double(mse)
             }
         }
+
+class SimpleXLSXEditor {
+    private var archive: Archive
+    private var tempDir: URL
+    private var sheetPath = "xl/worksheets/sheet1.xml"
+    private var filePath: String
+
+    init(filePath: String) {
+        self.filePath = filePath
+        self.tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        let xlsxURL = URL(fileURLWithPath: filePath)
+        guard let archive = Archive(url: xlsxURL, accessMode: .read, preferredEncoding: .utf8) else {
+            fatalError("Failed to open XLSX archive.")
+        }
+        self.archive = archive
+        do {
+            for entry in archive {
+                let destinationURL = tempDir.appendingPathComponent(entry.path)
+                try archive.extract(entry, to: destinationURL)
+            }
+        } catch {
+            fatalError("Failed to extract XLSX archive: \(error.localizedDescription)")
+        }
+    }
+
+    func writeRow(rowIndex: Int, values: [String]) {
+        let sheetURL = tempDir.appendingPathComponent(sheetPath)
+        guard var content = try? String(contentsOf: sheetURL) else { return }
+
+        let newRow =
+            """
+            <row r="\(rowIndex)">
+                <c r="B\(rowIndex)" t="n"><v>\(values[0])</v></c>
+                <c r="C\(rowIndex)" t="n"><v>\(values[1])</v></c>
+            </row>
+            """
+
+        if let range = content.range(of: "</sheetData>") {
+            content.insert(contentsOf: newRow + "\n", at: range.lowerBound)
+        }
+
+        try? content.write(to: sheetURL, atomically: true, encoding: .utf8)
+    }
+
+
+    func save(to destinationPath: String) {
+        let fileManager = FileManager.default
+        let destinationURL = URL(fileURLWithPath: destinationPath)
+
+        // Remove existing file if it exists
+        try? fileManager.removeItem(at: destinationURL)
+
+        // Create new XLSX archive
+        guard let newArchive = Archive(url: destinationURL, accessMode: .create) else {
+            fatalError("Unable to create archive at destination.")
+        }
+
+        let enumerator = fileManager.enumerator(at: tempDir, includingPropertiesForKeys: [.fileSizeKey])!
+
+        for case let fileURL as URL in enumerator {
+            guard fileURL.hasDirectoryPath == false else { continue }
+            let relativePath = fileURL.path.replacingOccurrences(of: tempDir.path + "/", with: "")
+            if let data = try? Data(contentsOf: fileURL) {
+                try? newArchive.addEntry(
+                    with: relativePath,
+                    type: .file,
+                    uncompressedSize: UInt32(data.count),
+                    compressionMethod: .deflate,
+                    provider: { position, size in
+                        return data.subdata(in: position..<position + size)
+                    }
+                )
+            }
+        }
+    }
+
+
+}

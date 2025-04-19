@@ -3,6 +3,7 @@
 //
 //  Created by wheissmd on 17/04/2025.
 
+
 import SwiftUI
 
 struct AppConfig: Codable {
@@ -34,30 +35,6 @@ struct ContentView: View {
 
     @State private var processingDuration = 0
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
-
-    @State private var showFullDiskAccessAlert = false
-    @State private var showGraphPermissionsPopup = false
-    @State private var showInteractiveWarning = false
-
-    @State private var permissionCheckResults = [
-        "Numbers Installed": false,
-        "Numbers Full Disk Access": false,
-        "Terminal Full Disk Access": false,
-        "AppleScript Automation Enabled": false
-    ]
-    
-    @State private var showPermissionsPopup = false
-    @State private var canProceedWithInteractive = false
-
-    private func checkAllPermissions() {
-        let appleScriptPerm = checkAppleScriptPermission()
-        let numbersInstalled = checkIfNumbersInstalled()
-        let terminalAccess = checkFullDiskAccess(bundleId: "com.apple.Terminal")
-        let numbersAccess = checkFullDiskAccess(bundleId: "com.apple.iWork.Numbers")
-
-        canProceedWithInteractive = appleScriptPerm && numbersInstalled && terminalAccess && numbersAccess
-    }
-
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -104,24 +81,6 @@ struct ContentView: View {
                     }
                     .pickerStyle(SegmentedPickerStyle())
                     .padding(.horizontal, 40)
-                    .onChange(of: graphType) { newValue in
-                        print("GraphType changed to: \(newValue)")
-                        if newValue == "Interactive" {
-                            updateGraphPermissions()
-
-                            // Delay to wait for async permission check to complete
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                                let granted = permissionCheckResults.values.allSatisfy { $0 }
-                                if !granted {
-                                    graphType = "Image"
-                                    showInteractiveWarning = true
-                                }
-                            }
-                        }
-                    }
-
-
-
                 }
 
                 VStack(alignment: .leading) {
@@ -207,47 +166,6 @@ struct ContentView: View {
                     processingDuration += 1
                 }
             }
-            .alert(isPresented: $showFullDiskAccessAlert) {
-                Alert(
-                    title: Text("Full Disk Access Required"),
-                    message: Text("To export the graph, please enable Full Disk Access for Terminal, Xcode, and Numbers in System Settings → Privacy & Security."),
-                    primaryButton: .default(Text("Open Settings"), action: {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-                            NSWorkspace.shared.open(url)
-                        }
-                    }),
-                    secondaryButton: .cancel()
-                )
-            }
-            .sheet(isPresented: $showInteractiveWarning) {
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("⚠️ Interactive Export Requirements")
-                        .font(.title2).bold()
-
-                    ForEach(permissionCheckResults.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
-                        HStack {
-                            Image(systemName: value ? "checkmark.circle.fill" : "xmark.circle.fill")
-                                .foregroundColor(value ? .green : .red)
-                            Text(key)
-                        }
-                    }
-
-                    Divider()
-
-                    Button("Open Privacy & Security Settings") {
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
-                            NSWorkspace.shared.open(url)
-                        }
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button("Close") {
-                        showInteractiveWarning = false
-                    }
-                }
-                .padding()
-                .frame(width: 400)
-            }
 
             if measureProcessingTime && (isAnalyzing || processingDuration > 0) {
                 Text("Processing Time: \(formatDuration(processingDuration))")
@@ -256,58 +174,6 @@ struct ContentView: View {
                     .padding(.trailing, 12)
                     .padding(.bottom, 10)
             }
-        }
-    }
-
-    func allPermissionsGranted() -> Bool {
-        return permissionCheckResults.values.allSatisfy { $0 }
-    }
-
-    func updateGraphPermissions() {
-        permissionCheckResults["Numbers Installed"] = FileManager.default.fileExists(atPath: "/Applications/Numbers.app") || FileManager.default.fileExists(atPath: "/System/Applications/Numbers.app")
-
-        permissionCheckResults["AppleScript Automation Enabled"] = {
-            let script = """
-            tell application \"System Events\"
-                get name of application processes
-            end tell
-            """
-            let task = Process()
-            task.launchPath = "/usr/bin/osascript"
-            task.arguments = ["-e", script]
-
-            let pipe = Pipe()
-            task.standardOutput = pipe
-            task.standardError = pipe
-            task.launch()
-            task.waitUntilExit()
-
-            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            return !output.contains("Not authorized") && task.terminationStatus == 0
-        }()
-
-        permissionCheckResults["Terminal Full Disk Access"] = testDiskAccess(forApp: "Terminal")
-        permissionCheckResults["Numbers Full Disk Access"] = testDiskAccess(forApp: "Numbers")
-
-        print("Permission Check Results:")
-        for (key, value) in permissionCheckResults {
-            print("- \(key): \(value)")
-        }
-    }
-
-    func testDiskAccess(forApp appName: String) -> Bool {
-        let testDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/FrameTool")
-        let testFile = testDir.appendingPathComponent("fd_access_test.txt")
-
-        do {
-            try FileManager.default.createDirectory(at: testDir, withIntermediateDirectories: true, attributes: nil)
-            try "test".write(to: testFile, atomically: true, encoding: .utf8)
-            try FileManager.default.removeItem(at: testFile)
-            return true
-        } catch {
-            print("❌ [\(appName)] Full Disk Access test failed: \(error.localizedDescription)")
-            return false
         }
     }
 
@@ -374,32 +240,6 @@ struct ContentView: View {
             csvExportPath = config.csvExportPath
         }
     }
-    
-    func checkIfNumbersInstalled() -> Bool {
-        let fm = FileManager.default
-        return fm.fileExists(atPath: "/Applications/Numbers.app")
-    }
-
-    func checkFullDiskAccess(bundleId: String) -> Bool {
-        let url = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
-        let testPath = url.path
-        return FileManager.default.isReadableFile(atPath: testPath)
-    }
-
-    func checkAppleScriptPermission() -> Bool {
-        let appleScript = """
-        tell application "System Events"
-            return true
-        end tell
-        """
-        var error: NSDictionary?
-        if let scriptObject = NSAppleScript(source: appleScript) {
-            scriptObject.executeAndReturnError(&error)
-            return error == nil
-        }
-        return false
-    }
-
 }
 
 struct ContentView_Previews: PreviewProvider {
