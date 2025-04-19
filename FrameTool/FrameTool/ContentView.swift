@@ -45,6 +45,19 @@ struct ContentView: View {
         "Terminal Full Disk Access": false,
         "AppleScript Automation Enabled": false
     ]
+    
+    @State private var showPermissionsPopup = false
+    @State private var canProceedWithInteractive = false
+
+    private func checkAllPermissions() {
+        let appleScriptPerm = checkAppleScriptPermission()
+        let numbersInstalled = checkIfNumbersInstalled()
+        let terminalAccess = checkFullDiskAccess(bundleId: "com.apple.Terminal")
+        let numbersAccess = checkFullDiskAccess(bundleId: "com.apple.iWork.Numbers")
+
+        canProceedWithInteractive = appleScriptPerm && numbersInstalled && terminalAccess && numbersAccess
+    }
+
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -91,15 +104,24 @@ struct ContentView: View {
                     }
                     .pickerStyle(SegmentedPickerStyle())
                     .padding(.horizontal, 40)
-                    .onChange(of: graphType) { newType in
-                        if newType == "Interactive" {
-                            checkGraphPermissions()
-                            if !allPermissionsGranted() {
-                                showInteractiveWarning = true
-                                graphType = "Image"
+                    .onChange(of: graphType) { newValue in
+                        print("GraphType changed to: \(newValue)")
+                        if newValue == "Interactive" {
+                            updateGraphPermissions()
+
+                            // Delay to wait for async permission check to complete
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                                let granted = permissionCheckResults.values.allSatisfy { $0 }
+                                if !granted {
+                                    graphType = "Image"
+                                    showInteractiveWarning = true
+                                }
                             }
                         }
                     }
+
+
+
                 }
 
                 VStack(alignment: .leading) {
@@ -241,11 +263,52 @@ struct ContentView: View {
         return permissionCheckResults.values.allSatisfy { $0 }
     }
 
-    func checkGraphPermissions() {
-        permissionCheckResults["Numbers Installed"] = FileManager.default.fileExists(atPath: "/Applications/Numbers.app")
-        permissionCheckResults["Terminal Full Disk Access"] = false
-        permissionCheckResults["Numbers Full Disk Access"] = false
-        permissionCheckResults["AppleScript Automation Enabled"] = false
+    func updateGraphPermissions() {
+        permissionCheckResults["Numbers Installed"] = FileManager.default.fileExists(atPath: "/Applications/Numbers.app") || FileManager.default.fileExists(atPath: "/System/Applications/Numbers.app")
+
+        permissionCheckResults["AppleScript Automation Enabled"] = {
+            let script = """
+            tell application \"System Events\"
+                get name of application processes
+            end tell
+            """
+            let task = Process()
+            task.launchPath = "/usr/bin/osascript"
+            task.arguments = ["-e", script]
+
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            task.standardError = pipe
+            task.launch()
+            task.waitUntilExit()
+
+            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            return !output.contains("Not authorized") && task.terminationStatus == 0
+        }()
+
+        permissionCheckResults["Terminal Full Disk Access"] = testDiskAccess(forApp: "Terminal")
+        permissionCheckResults["Numbers Full Disk Access"] = testDiskAccess(forApp: "Numbers")
+
+        print("Permission Check Results:")
+        for (key, value) in permissionCheckResults {
+            print("- \(key): \(value)")
+        }
+    }
+
+    func testDiskAccess(forApp appName: String) -> Bool {
+        let testDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/FrameTool")
+        let testFile = testDir.appendingPathComponent("fd_access_test.txt")
+
+        do {
+            try FileManager.default.createDirectory(at: testDir, withIntermediateDirectories: true, attributes: nil)
+            try "test".write(to: testFile, atomically: true, encoding: .utf8)
+            try FileManager.default.removeItem(at: testFile)
+            return true
+        } catch {
+            print("❌ [\(appName)] Full Disk Access test failed: \(error.localizedDescription)")
+            return false
+        }
     }
 
     func runAnalysis() {
@@ -311,6 +374,32 @@ struct ContentView: View {
             csvExportPath = config.csvExportPath
         }
     }
+    
+    func checkIfNumbersInstalled() -> Bool {
+        let fm = FileManager.default
+        return fm.fileExists(atPath: "/Applications/Numbers.app")
+    }
+
+    func checkFullDiskAccess(bundleId: String) -> Bool {
+        let url = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Library/Application Support")
+        let testPath = url.path
+        return FileManager.default.isReadableFile(atPath: testPath)
+    }
+
+    func checkAppleScriptPermission() -> Bool {
+        let appleScript = """
+        tell application "System Events"
+            return true
+        end tell
+        """
+        var error: NSDictionary?
+        if let scriptObject = NSAppleScript(source: appleScript) {
+            scriptObject.executeAndReturnError(&error)
+            return error == nil
+        }
+        return false
+    }
+
 }
 
 struct ContentView_Previews: PreviewProvider {

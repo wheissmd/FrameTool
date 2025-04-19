@@ -230,7 +230,7 @@ public struct FrameAnalyzer {
                 }
                 
                 //Export Table and Inject data via Apple Script
-                if exportGraph && graphType == "Static" {
+                if exportGraph && graphType == "Interactive" {
                     let graphTemplatePath = Bundle.main.path(forResource: "GraphTemplate", ofType: "numbers")!
                     let destinationPath = URL(fileURLWithPath: finalOutputPath).appendingPathComponent("frametime_graph.numbers").path
                     let scriptPath = Bundle.main.path(forResource: "InjectValuesForGraph", ofType: "scpt")!
