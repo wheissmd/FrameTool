@@ -11,6 +11,8 @@ struct AppConfig: Codable {
     var reportStatistics: Bool
     var statisticsType: String
     var csvExportPath: String
+    var exportGraph: Bool
+    var graphType: String
 }
 
 struct ContentView: View {
@@ -26,8 +28,23 @@ struct ContentView: View {
     @State private var statisticsType = "General"
     private let statisticsOptions: [String] = ["General", "Detailed"]
 
+    @State private var exportGraph = false
+    @State private var graphType = "Image"
+    private let graphOptions: [String] = ["Image", "Interactive", "Animated Overlay"]
+
     @State private var processingDuration = 0
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    @State private var showFullDiskAccessAlert = false
+    @State private var showGraphPermissionsPopup = false
+    @State private var showInteractiveWarning = false
+
+    @State private var permissionCheckResults = [
+        "Numbers Installed": false,
+        "Numbers Full Disk Access": false,
+        "Terminal Full Disk Access": false,
+        "AppleScript Automation Enabled": false
+    ]
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -40,7 +57,7 @@ struct ContentView: View {
                     .padding(.horizontal, 40)
 
                 if multithreadingEnabled {
-                    Text("⚠️ WARNING: Multithreading requires at least 16GB of RAM, otherwise it slows down the processing and might result in an error.")
+                    Text("⚠️ WARNING: Multithreading requires at least 16GB of RAM, otherwise it slows down the processing.")
                         .foregroundColor(.orange)
                         .font(.caption)
                         .multilineTextAlignment(.center)
@@ -55,12 +72,34 @@ struct ContentView: View {
 
                 if reportStatistics {
                     Picker("Statistics Type", selection: $statisticsType) {
-                        ForEach(statisticsOptions, id: \ .self) { option in
+                        ForEach(statisticsOptions, id: \.self) { option in
                             Text(option)
                         }
                     }
                     .pickerStyle(SegmentedPickerStyle())
                     .padding(.horizontal, 40)
+                }
+
+                Toggle("Export Graph", isOn: $exportGraph)
+                    .padding(.horizontal, 40)
+
+                if exportGraph {
+                    Picker("Graph Type", selection: $graphType) {
+                        ForEach(graphOptions, id: \.self) { type in
+                            Text(type)
+                        }
+                    }
+                    .pickerStyle(SegmentedPickerStyle())
+                    .padding(.horizontal, 40)
+                    .onChange(of: graphType) { newType in
+                        if newType == "Interactive" {
+                            checkGraphPermissions()
+                            if !allPermissionsGranted() {
+                                showInteractiveWarning = true
+                                graphType = "Image"
+                            }
+                        }
+                    }
                 }
 
                 VStack(alignment: .leading) {
@@ -136,7 +175,7 @@ struct ContentView: View {
 
                 Spacer()
             }
-            .frame(width: 600, height: 720)
+            .frame(width: 600, height: 760)
             .padding()
             .onAppear {
                 loadConfig()
@@ -145,6 +184,47 @@ struct ContentView: View {
                 if isAnalyzing {
                     processingDuration += 1
                 }
+            }
+            .alert(isPresented: $showFullDiskAccessAlert) {
+                Alert(
+                    title: Text("Full Disk Access Required"),
+                    message: Text("To export the graph, please enable Full Disk Access for Terminal, Xcode, and Numbers in System Settings → Privacy & Security."),
+                    primaryButton: .default(Text("Open Settings"), action: {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }),
+                    secondaryButton: .cancel()
+                )
+            }
+            .sheet(isPresented: $showInteractiveWarning) {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("⚠️ Interactive Export Requirements")
+                        .font(.title2).bold()
+
+                    ForEach(permissionCheckResults.sorted(by: { $0.key < $1.key }), id: \.key) { key, value in
+                        HStack {
+                            Image(systemName: value ? "checkmark.circle.fill" : "xmark.circle.fill")
+                                .foregroundColor(value ? .green : .red)
+                            Text(key)
+                        }
+                    }
+
+                    Divider()
+
+                    Button("Open Privacy & Security Settings") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    .buttonStyle(.bordered)
+
+                    Button("Close") {
+                        showInteractiveWarning = false
+                    }
+                }
+                .padding()
+                .frame(width: 400)
             }
 
             if measureProcessingTime && (isAnalyzing || processingDuration > 0) {
@@ -155,6 +235,17 @@ struct ContentView: View {
                     .padding(.bottom, 10)
             }
         }
+    }
+
+    func allPermissionsGranted() -> Bool {
+        return permissionCheckResults.values.allSatisfy { $0 }
+    }
+
+    func checkGraphPermissions() {
+        permissionCheckResults["Numbers Installed"] = FileManager.default.fileExists(atPath: "/Applications/Numbers.app")
+        permissionCheckResults["Terminal Full Disk Access"] = false
+        permissionCheckResults["Numbers Full Disk Access"] = false
+        permissionCheckResults["AppleScript Automation Enabled"] = false
     }
 
     func runAnalysis() {
@@ -173,7 +264,9 @@ struct ContentView: View {
                 outputPath: csvExportPath,
                 isMultithreading: multithreadingEnabled,
                 reportStats: reportStatistics,
-                statsMode: statisticsType
+                statsMode: statisticsType,
+                exportGraph: exportGraph,
+                graphType: graphType
             )
 
             DispatchQueue.main.async {
@@ -196,7 +289,9 @@ struct ContentView: View {
             measureProcessingTime: measureProcessingTime,
             reportStatistics: reportStatistics,
             statisticsType: statisticsType,
-            csvExportPath: csvExportPath
+            csvExportPath: csvExportPath,
+            exportGraph: exportGraph,
+            graphType: graphType
         )
         if let data = try? JSONEncoder().encode(config) {
             let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("frametool_config.json")
@@ -211,6 +306,8 @@ struct ContentView: View {
             measureProcessingTime = config.measureProcessingTime
             reportStatistics = config.reportStatistics
             statisticsType = config.statisticsType
+            exportGraph = config.exportGraph
+            graphType = config.graphType
             csvExportPath = config.csvExportPath
         }
     }

@@ -13,7 +13,8 @@ public struct FrameAnalyzer {
         ///   - videoPath: path to the input video file
         ///   - outputPath: folder to write the CSV output
         ///   - isMultithreading: whether to analyze using multiple CPU threads
-    public static func runAnalysis(videoPath: String, outputPath: String, isMultithreading: Bool, reportStats: Bool, statsMode: String) -> String {
+    public static func runAnalysis(videoPath: String, outputPath: String, isMultithreading: Bool, reportStats: Bool, statsMode: String, exportGraph: Bool = false, graphType: String = "") -> String {
+
 
             var outputLog = ""
             func log(_ msg: String) {
@@ -86,7 +87,7 @@ public struct FrameAnalyzer {
                     CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly)
                 }
 
-                log("✅ Loaded \(frames.count) frames")
+                //log("✅ Loaded \(frames.count) frames")
                 log("🧠 Analyzing frame deltas in parallel...")
 
                 // Compute differences between frames in parallel
@@ -227,6 +228,50 @@ public struct FrameAnalyzer {
 
                     }
                 }
+                
+                //Export Table and Inject data via Apple Script
+                if exportGraph && graphType == "Static" {
+                    let graphTemplatePath = Bundle.main.path(forResource: "GraphTemplate", ofType: "numbers")!
+                    let destinationPath = URL(fileURLWithPath: finalOutputPath).appendingPathComponent("frametime_graph.numbers").path
+                    let scriptPath = Bundle.main.path(forResource: "InjectValuesForGraph", ofType: "scpt")!
+
+                    // Prepare raw injection data for script
+                    let frameDataRows = frameTimes
+                        .filter { $0.3 > 0 }
+                        .map {
+                            let timestamp = String(format: "%.4f", $0.1)
+                            let frametime = String(format: "%.4f", $0.3 * 1000.0)
+                            return "\(timestamp),\(frametime)"
+                        }.joined(separator: "\n")
+
+                    do {
+                        // Copy the .numbers template to output location
+                        try FileManager.default.copyItem(atPath: graphTemplatePath, toPath: destinationPath)
+                        log("📄 Graph template copied to \(destinationPath)")
+
+                        // Call AppleScript with data
+                        let task = Process()
+                        task.launchPath = "/usr/bin/osascript"
+                        task.arguments = [scriptPath, destinationPath, destinationPath, frameDataRows]
+
+                        let pipe = Pipe()
+                        task.standardOutput = pipe
+                        task.standardError = pipe
+
+                        task.launch()
+                        task.waitUntilExit()
+
+                        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                        let output = String(data: data, encoding: .utf8) ?? ""
+                        log("📈 AppleScript executed: \(output)")
+
+                    } catch {
+                        log("⚠️ Error during graph generation: \(error.localizedDescription)")
+                    }
+                }
+
+
+
 
                 let csvRows = frameTimes.map {
                     let timestampMs = $0.1 * 1000.0
