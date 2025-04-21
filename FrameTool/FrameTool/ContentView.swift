@@ -38,10 +38,17 @@ struct ContentView: View {
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            VStack(spacing: 16) {
-                Text("FrameTool")
-                    .font(.title)
-                    .padding(.top)
+            VStack(spacing: 14) {
+                VStack(spacing: 0) {
+                    Text("FrameTool")
+                        .font(.title)
+                        .padding(.top, 16)
+
+                    Text("by Hardware Lab / wheissmd")
+                        .font(.caption2)
+                        .foregroundColor(.gray)
+                }
+
 
                 Toggle("Enable Multithreading", isOn: $multithreadingEnabled)
                     .padding(.horizontal, 40)
@@ -84,7 +91,7 @@ struct ContentView: View {
                 }
 
                 VStack(alignment: .leading) {
-                    Text("CSV Export Path:")
+                    Text("Export Path:")
                         .font(.subheadline)
 
                     HStack {

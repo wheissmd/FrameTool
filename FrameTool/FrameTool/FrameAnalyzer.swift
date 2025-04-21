@@ -6,7 +6,6 @@
 import AVFoundation
 import CoreImage
 import Accelerate
-import ZIPFoundation
 import AppKit
 import CoreText
 extension vImage_Buffer {
