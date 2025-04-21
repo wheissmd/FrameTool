@@ -14,6 +14,7 @@ The app calculates:
 - **Minimum FPS**
 - **Maximum FPS**
 - **Exports csv Table with every frame's display time**
+- **Has options for additional exports (like Graphs or Statistics)**
 
 These calculations are based solely on the **frame time that was captured**, and do **not reflect internal game engine behavior**. As such, FrameTool's readings do **not directly compare to** tools like MSI Afterburner or Fraps.
 
