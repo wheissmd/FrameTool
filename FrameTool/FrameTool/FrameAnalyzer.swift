@@ -297,20 +297,29 @@ public struct FrameAnalyzer {
                 .map { String(format: "%.4f", $0.3 * 1000.0) }
             
             // Collect FPS data per 1/4 second
-            var fpsDict = [Double: Int]()
+            var fpsDict = [Double: [Double]]()
+
             for (_, timestamp, isChange, delta) in frameTimes where isChange && delta > 0.0 {
                 let bucket = Double(Int(timestamp / 0.25)) * 0.25
-                fpsDict[bucket, default: 0] += 1
+                fpsDict[bucket, default: []].append(timestamp)
             }
-            
-            
-            var fpsTimeValues = fpsDict.keys.sorted()
-            var fpsValues = fpsTimeValues.map { Double(fpsDict[$0] ?? 0) * 4.0 }
-            
-            if fpsTimeValues.count > 2 {
-                fpsTimeValues = Array(fpsTimeValues.dropLast(2))
-                fpsValues = Array(fpsValues.dropLast(2))
+
+            var fpsTimeValues: [Double] = []
+            var fpsValues: [Double] = []
+
+            for (bucketStart, timestamps) in fpsDict.sorted(by: { $0.key < $1.key }) {
+                guard timestamps.count >= 2 else {
+                    fpsTimeValues.append(bucketStart)
+                    fpsValues.append(Double(timestamps.count))  // fallback to count if only 1 frame
+                    continue
+                }
+
+                let duration = timestamps.last! - timestamps.first!
+                let fps = Double(timestamps.count - 1) / duration
+                fpsTimeValues.append(bucketStart)
+                fpsValues.append(fps)
             }
+
             
             let trimmedFpsTime = fpsTimeValues.map { String(format: "%.2f", $0) }
             let trimmedFpsValues = fpsValues.map { String(format: "%.2f", $0) }
@@ -737,12 +746,25 @@ public struct FrameAnalyzer {
                                     var fpsBuckets: [(time: Double, fps: Double)] = []
                                     let step: Double = 0.25
                                     var bucketTime: Double = 0.0
+
                                     while bucketTime < currentTime {
                                         let next = bucketTime + step
-                                        let count = frameDeltaValues.filter { $0.0 >= bucketTime && $0.0 < next }.count
-                                        fpsBuckets.append((time: bucketTime, fps: Double(count) * 4.0))
+                                        let timestamps = frameDeltaValues
+                                            .filter { $0.0 >= bucketTime && $0.0 < next }
+                                            .map { $0.0 }
+
+                                        let fps: Double
+                                        if timestamps.count >= 2 {
+                                            let duration = timestamps.last! - timestamps.first!
+                                            fps = Double(timestamps.count - 1) / duration
+                                        } else {
+                                            fps = Double(timestamps.count)
+                                        }
+
+                                        fpsBuckets.append((time: bucketTime, fps: fps))
                                         bucketTime = next
                                     }
+
 
                                     let visibleFpsPoints = fpsBuckets.filter {
                                         $0.time >= currentTime - windowDuration && $0.time <= currentTime
@@ -829,14 +851,18 @@ public struct FrameAnalyzer {
                                     let uniqueFTValues = Set(visiblePoints.map { round($0.1 * 10000) / 10 })  // round to 0.1ms
 
                                     let ftRange = maxDelta - minDelta
-                                    let frametimeGraphHeight: CGFloat = graphHeight * 1.2
+                                    let frametimeGraphHeight: CGFloat = graphHeight
                                     let frametimeYScale: CGFloat = ftRange != 0 ? frametimeGraphHeight / CGFloat(ftRange) : 1.0
 
 
-                                    for value in uniqueFTValues.sorted() {
-                                        let y = ftGraphY + CGFloat((value / 1000.0) - minDelta) * frametimeYScale  // convert back to seconds for position
+                                    var lastFtLabelY: CGFloat = -CGFloat.infinity
+                                    let minFtSpacing: CGFloat = 28.0
 
-                                        // Draw tick
+                                    for value in uniqueFTValues.sorted() {
+                                        let y = ftGraphY + CGFloat((value / 1000.0) - minDelta) * frametimeYScale
+                                        if abs(y - lastFtLabelY) < minFtSpacing { continue }
+                                        lastFtLabelY = y
+
                                         let tickStart = CGPoint(x: offsetX - 5, y: y)
                                         let tickEnd = CGPoint(x: offsetX, y: y)
                                         ctx.setStrokeColor(NSColor.white.cgColor)
@@ -846,8 +872,7 @@ public struct FrameAnalyzer {
                                         ctx.addLine(to: tickEnd)
                                         ctx.strokePath()
 
-                                        // Draw label
-                                        let label = String(format: "%.1f", value)  // show as milliseconds
+                                        let label = String(format: "%.1f", value)
                                         let attributes: [NSAttributedString.Key: Any] = [
                                             .font: CTFontCreateWithName("Menlo" as CFString, 22, nil),
                                             .foregroundColor: NSColor.white
@@ -860,11 +885,18 @@ public struct FrameAnalyzer {
 
 
 
+
                                     // === FPS Y-axis scale marks ===
                                     let uniqueFPSValues = Set(visibleFpsPoints.map { round($0.fps) })
 
+                                    var lastFpsLabelY: CGFloat = -CGFloat.infinity
+                                    let minFpsSpacing: CGFloat = 28.0
+
                                     for value in uniqueFPSValues.sorted() {
                                         let y = fpsGraphY + (CGFloat(value - minFps) * fpsYScale)
+                                        if abs(y - lastFpsLabelY) < minFpsSpacing { continue }
+                                        lastFpsLabelY = y
+
                                         let tickStart = CGPoint(x: offsetX - 5, y: y)
                                         let tickEnd = CGPoint(x: offsetX, y: y)
 
@@ -884,6 +916,7 @@ public struct FrameAnalyzer {
                                         ctx.textPosition = CGPoint(x: offsetX - 40, y: y - 8)
                                         CTLineDraw(CTLineCreateWithAttributedString(attrText), ctx)
                                     }
+
 
 
 
