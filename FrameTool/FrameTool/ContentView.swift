@@ -188,7 +188,7 @@ struct ContentView: View {
         saveConfig()
 
         DispatchQueue.global(qos: .userInitiated).async {
-            let result = FrameAnalyzer.runAnalysis(
+            FrameAnalyzer.runAnalysis(
                 videoPath: videoPath,
                 outputPath: csvExportPath,
                 isMultithreading: multithreadingEnabled,
@@ -196,13 +196,14 @@ struct ContentView: View {
                 statsMode: statisticsType,
                 exportGraph: exportGraph,
                 graphType: graphType
-            )
-
-            DispatchQueue.main.async {
-                self.outputText = result
-                self.isAnalyzing = false
-                self.isRunning = false
+            ) { result in
+                DispatchQueue.main.async {
+                    self.outputText = result
+                    self.isAnalyzing = false
+                    self.isRunning = false
+                }
             }
+
         }
     }
 
