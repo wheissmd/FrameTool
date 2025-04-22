@@ -71,8 +71,8 @@ public struct FrameAnalyzer {
 
             if isMultithreading {
                 log("📦 Loading frames into memory...")
-                var frames: [vImage_Buffer] = []     // Holds grayscale frame data
-                var timestamps: [Double] = []        // Timestamps for each frame
+                var frames: [vImage_Buffer] = []
+                var timestamps: [Double] = []
 
                 while let sampleBuffer = readerOutput.copyNextSampleBuffer(),
                       let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
@@ -93,14 +93,12 @@ public struct FrameAnalyzer {
                     vImageMatrixMultiply_ARGB8888ToPlanar8(&buffer, &grayBuffer, matrix, divisor, nil, 0, vImage_Flags(kvImageNoFlags))
 
                     frames.append(grayBuffer)
-
                     let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
                     timestamps.append(CMTimeGetSeconds(pts))
                     CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly)
                 }
 
                 log("🧠 Analyzing frame deltas in parallel...")
-
                 let queue = DispatchQueue(label: "compareQueue", attributes: .concurrent)
                 let group = DispatchGroup()
                 var diffs = Array(repeating: 0.0, count: frames.count)
@@ -113,6 +111,8 @@ public struct FrameAnalyzer {
                 group.wait()
 
                 var lastChange = 0
+                var consecutiveTearing = 0
+
                 for i in 0..<diffs.count {
                     let time = timestamps[i]
                     let diff = diffs[i]
@@ -131,7 +131,6 @@ public struct FrameAnalyzer {
                         for s in 0..<sliceCount {
                             let y = s * sliceHeight
                             let offset = y * rowBytes
-                            let size = (s == sliceCount - 1) ? (height - y) * rowBytes : sliceHeight * rowBytes
 
                             let curr = vImage_Buffer(data: frames[i].data + offset, height: vImagePixelCount(sliceHeight), width: vImagePixelCount(width), rowBytes: rowBytes)
                             let prev = vImage_Buffer(data: frames[i - 1].data + offset, height: vImagePixelCount(sliceHeight), width: vImagePixelCount(width), rowBytes: rowBytes)
@@ -145,12 +144,13 @@ public struct FrameAnalyzer {
                         }
 
                         if (matchPrev > 0 || matchNext > 0) && (matchPrev + matchNext < sliceCount) {
-                            isSceneChange = false
-                            print("🧩 Tearing detected at frame \(i): matchPrev=\(matchPrev), matchNext=\(matchNext)")
+                            consecutiveTearing += 1
+                            isSceneChange = (consecutiveTearing % 2 == 0)
+                            print("🧩 Tearing detected at frame \(i): matchPrev=\(matchPrev), matchNext=\(matchNext), consecutive=\(consecutiveTearing)")
+                        } else {
+                            consecutiveTearing = 0
                         }
                     }
-
-
 
                     if isSceneChange {
                         let delta = time - timestamps[lastChange]
@@ -167,9 +167,7 @@ public struct FrameAnalyzer {
                 var prevBuffer: vImage_Buffer? = nil
                 var index = 0
                 var lastChange = 0
-
-                var frames: [vImage_Buffer] = []
-                var timestamps: [Double] = []
+                var consecutiveTearing = 0
 
                 let analysisAsset = AVAsset(url: URL(fileURLWithPath: videoPath))
                 guard let analysisTrack = analysisAsset.tracks(withMediaType: .video).first else {
@@ -183,9 +181,6 @@ public struct FrameAnalyzer {
                 let analysisOutput = AVAssetReaderTrackOutput(track: analysisTrack, outputSettings: [
                     kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
                 ])
-                guard analysisReader.canAdd(analysisOutput) else {
-                    fatalError("❌ Cannot add analysisOutput to reader")
-                }
                 analysisReader.add(analysisOutput)
                 analysisReader.startReading()
 
@@ -223,7 +218,7 @@ public struct FrameAnalyzer {
                             let diff = mseVImage(grayBuffer, prev)
                             isSceneChange = diff > 1.0
 
-                            if detectTearing && index > 0 && index < frames.count {
+                            if detectTearing && index > 0 {
                                 let height = Int(grayBuffer.height)
                                 let width = Int(grayBuffer.width)
                                 let rowBytes = grayBuffer.rowBytes
@@ -235,7 +230,6 @@ public struct FrameAnalyzer {
                                 for s in 0..<sliceCount {
                                     let y = s * sliceHeight
                                     let offset = y * rowBytes
-                                    let size = (s == sliceCount - 1) ? (height - y) * rowBytes : sliceHeight * rowBytes
 
                                     let curr = vImage_Buffer(data: grayBuffer.data + offset, height: vImagePixelCount(sliceHeight), width: vImagePixelCount(width), rowBytes: rowBytes)
                                     let prevSlice = vImage_Buffer(data: prev.data + offset, height: vImagePixelCount(sliceHeight), width: vImagePixelCount(width), rowBytes: rowBytes)
@@ -245,14 +239,16 @@ public struct FrameAnalyzer {
                                 }
 
                                 if matchPrev > 0 && matchPrev < sliceCount {
-                                    isSceneChange = false
-                                    print("🧩 Tearing detected at frame \(index): matchPrev=\(matchPrev)")
+                                    consecutiveTearing += 1
+                                    isSceneChange = (consecutiveTearing % 2 == 0)
+                                    print("🧩 Tearing detected at frame \(index): matchPrev=\(matchPrev), consecutive=\(consecutiveTearing)")
+                                } else {
+                                    consecutiveTearing = 0
                                 }
                             }
 
-
+                            let delta = (lastChange < frameTimes.count) ? time - frameTimes[lastChange].1 : 0
                             if isSceneChange {
-                                let delta = time - frameTimes[lastChange].1
                                 frameTimes.append((index, time, true, delta))
                                 lastChange = index
                             } else {
@@ -276,6 +272,7 @@ public struct FrameAnalyzer {
                     free(last.data)
                 }
             }
+
 
             log("✅ Processed \(frameTimes.count) frames")
 
