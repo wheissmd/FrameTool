@@ -24,223 +24,273 @@ public struct FrameAnalyzer {
     ///   - outputPath: folder to write the CSV output
     ///   - isMultithreading: whether to analyze using multiple CPU threads
     public static func runAnalysis(
-        videoPath: String,
-        outputPath: String,
-        isMultithreading: Bool,
-        reportStats: Bool,
-        statsMode: String,
-        exportGraph: Bool = false,
-        graphType: String,
-        onComplete: @escaping (String) -> Void = { _ in }
-    )
-    -> String {
-        
-        
-        var outputLog = ""
-        func log(_ msg: String) {
-            outputLog += msg + "\n"
-            print(msg)  // Also output to Xcode console
-        }
-        
-        let finalOutputPath: String = outputPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.path : outputPath
-        
-        // Load video file from given path
-        let videoURL = URL(fileURLWithPath: videoPath)
-        let asset = AVAsset(url: videoURL)
-        
-        // Attempt to find a video track in the asset
-        guard let track = asset.tracks(withMediaType: .video).first else {
-            log("⚠️ ERROR: No video track found")
-            return outputLog
-        }
-        
-        // Create AVAssetReader to read raw video frames
-        let videoAsset = AVAsset(url: URL(fileURLWithPath: videoPath))
-        guard let readerTrack = videoAsset.tracks(withMediaType: .video).first else {
-            log("❌ Could not get video track.")
-            return outputLog
-        }
-
-        let reader = try! AVAssetReader(asset: videoAsset)
-        let readerOutput = AVAssetReaderTrackOutput(track: readerTrack, outputSettings: [
-            kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
-        ])
-        reader.add(readerOutput)
-        reader.startReading()
-        
-        // List to store (frameIndex, timestamp, isChangeDetected, timeSinceLastChange)
-        var frameTimes: [(Int, Double, Bool, Double)] = []
-        
-        if isMultithreading {
-            log("📦 Loading frames into memory...")
-            var frames: [vImage_Buffer] = []     // Holds grayscale frame data
-            var timestamps: [Double] = []        // Timestamps for each frame
-            
-            // Read and convert all frames
-            while let sampleBuffer = readerOutput.copyNextSampleBuffer(),
-                  let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
-                
-                CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
-                let width = CVPixelBufferGetWidth(imageBuffer)
-                let height = CVPixelBufferGetHeight(imageBuffer)
-                let baseAddress = CVPixelBufferGetBaseAddress(imageBuffer)
-                let rowBytes = CVPixelBufferGetBytesPerRow(imageBuffer)
-                
-                var buffer = vImage_Buffer(data: baseAddress, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: rowBytes)
-                
-                // Allocate grayscale buffer
-                var grayBuffer = vImage_Buffer()
-                vImageBuffer_Init(&grayBuffer, buffer.height, buffer.width, 8, vImage_Flags(kvImageNoFlags))
-                
-                // Apply grayscale conversion matrix (ARGB to grayscale)
-                let matrix: [Int16] = [54, 183, 19, 0]  // Based on luminance weights
-                let divisor: Int32 = 256
-                vImageMatrixMultiply_ARGB8888ToPlanar8(&buffer, &grayBuffer, matrix, divisor, nil, 0, vImage_Flags(kvImageNoFlags))
-                
-                frames.append(grayBuffer)
-                
-                // Store timestamp of current frame
-                let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-                timestamps.append(CMTimeGetSeconds(pts))
-                CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly)
+            videoPath: String,
+            outputPath: String,
+            isMultithreading: Bool,
+            reportStats: Bool,
+            statsMode: String,
+            exportGraph: Bool = false,
+            graphType: String,
+            detectTearing: Bool = false,
+            onComplete: @escaping (String) -> Void = { _ in }
+        ) -> String {
+            var outputLog = ""
+            func log(_ msg: String) {
+                outputLog += msg + "\n"
+                print(msg)  // Also output to Xcode console
             }
-            
-            //log("✅ Loaded \(frames.count) frames")
-            log("🧠 Analyzing frame deltas in parallel...")
-            
-            // Compute differences between frames in parallel
-            let queue = DispatchQueue(label: "compareQueue", attributes: .concurrent)
-            let group = DispatchGroup()
-            var diffs = Array(repeating: 0.0, count: frames.count)
-            
-            for i in 1..<frames.count {
-                queue.async(group: group) {
-                    diffs[i] = mseVImage(frames[i], frames[i - 1])
-                }
-            }
-            group.wait()  // Wait until all diffs are computed
-            
-            // Identify changes using diff threshold and calculate delta timing
-            var lastChange = 0
-            for i in 0..<diffs.count {
-                let time = timestamps[i]
-                let diff = diffs[i]
-                if diff > 1.0 {
-                    let delta = time - timestamps[lastChange]
-                    frameTimes.append((i, time, true, delta))
-                    lastChange = i
-                } else {
-                    frameTimes.append((i, time, false, 0))
-                }
-            }
-            frames.forEach { free($0.data) }  // Free memory
-            
-        } else {
-            log("🧠 Analyzing frame deltas sequentially...")
-            var prevBuffer: vImage_Buffer? = nil
-            var index = 0
-            var lastChange = 0
 
-            var frames: [vImage_Buffer] = []
-            var timestamps: [Double] = []
+            let finalOutputPath: String = outputPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.path : outputPath
 
-            // === Create fresh reader + output for single-threaded analysis ===
-            let analysisAsset = AVAsset(url: URL(fileURLWithPath: videoPath))
-            guard let analysisTrack = analysisAsset.tracks(withMediaType: .video).first else {
-                log("❌ Could not get video track for sequential analysis.")
+            // Load video file from given path
+            let videoURL = URL(fileURLWithPath: videoPath)
+            let asset = AVAsset(url: videoURL)
+
+            // Attempt to find a video track in the asset
+            guard let track = asset.tracks(withMediaType: .video).first else {
+                log("⚠️ ERROR: No video track found")
                 return outputLog
             }
-            guard let analysisReader = try? AVAssetReader(asset: analysisAsset) else {
-                log("❌ Could not create AVAssetReader for sequential analysis.")
+
+            // Create AVAssetReader to read raw video frames
+            let videoAsset = AVAsset(url: URL(fileURLWithPath: videoPath))
+            guard let readerTrack = videoAsset.tracks(withMediaType: .video).first else {
+                log("❌ Could not get video track.")
                 return outputLog
             }
-            let analysisOutput = AVAssetReaderTrackOutput(track: analysisTrack, outputSettings: [
+
+            let reader = try! AVAssetReader(asset: videoAsset)
+            let readerOutput = AVAssetReaderTrackOutput(track: readerTrack, outputSettings: [
                 kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
             ])
-            guard analysisReader.canAdd(analysisOutput) else {
-                fatalError("❌ Cannot add analysisOutput to reader")
-            }
-            analysisReader.add(analysisOutput)
-            analysisReader.startReading()
+            reader.add(readerOutput)
+            reader.startReading()
 
-            // === Analyze frames one by one ===
-            while let sampleBuffer = analysisOutput.copyNextSampleBuffer(),
-                  let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            // List to store (frameIndex, timestamp, isChangeDetected, timeSinceLastChange)
+            var frameTimes: [(Int, Double, Bool, Double)] = []
 
-                CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
-                let width = CVPixelBufferGetWidth(imageBuffer)
-                let height = CVPixelBufferGetHeight(imageBuffer)
-                let baseAddress = CVPixelBufferGetBaseAddress(imageBuffer)!
-                let rowBytes = CVPixelBufferGetBytesPerRow(imageBuffer)
+            if isMultithreading {
+                log("📦 Loading frames into memory...")
+                var frames: [vImage_Buffer] = []     // Holds grayscale frame data
+                var timestamps: [Double] = []        // Timestamps for each frame
 
-                var buffer = vImage_Buffer(data: baseAddress, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: rowBytes)
+                while let sampleBuffer = readerOutput.copyNextSampleBuffer(),
+                      let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
 
-                // Allocate grayscale buffer
-                var grayBuffer = vImage_Buffer()
-                let grayRowBytes = width
-                grayBuffer.data = malloc(height * grayRowBytes)
-                grayBuffer.height = vImagePixelCount(height)
-                grayBuffer.width = vImagePixelCount(width)
-                grayBuffer.rowBytes = grayRowBytes
+                    CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
+                    let width = CVPixelBufferGetWidth(imageBuffer)
+                    let height = CVPixelBufferGetHeight(imageBuffer)
+                    let baseAddress = CVPixelBufferGetBaseAddress(imageBuffer)
+                    let rowBytes = CVPixelBufferGetBytesPerRow(imageBuffer)
 
-                // Convert to grayscale
-                let matrix: [Int16] = [54, 183, 19, 0]
-                let divisor: Int32 = 256
-                let error = vImageMatrixMultiply_ARGB8888ToPlanar8(&buffer, &grayBuffer, matrix, divisor, nil, 0, vImage_Flags(kvImageNoFlags))
+                    var buffer = vImage_Buffer(data: baseAddress, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: rowBytes)
 
-                CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly)
+                    var grayBuffer = vImage_Buffer()
+                    vImageBuffer_Init(&grayBuffer, buffer.height, buffer.width, 8, vImage_Flags(kvImageNoFlags))
 
-                if error == kvImageNoError {
-                    let bufferCopy = grayBuffer.deepCopy()
+                    let matrix: [Int16] = [54, 183, 19, 0]
+                    let divisor: Int32 = 256
+                    vImageMatrixMultiply_ARGB8888ToPlanar8(&buffer, &grayBuffer, matrix, divisor, nil, 0, vImage_Flags(kvImageNoFlags))
+
+                    frames.append(grayBuffer)
+
                     let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-                    let time = CMTimeGetSeconds(pts)
-
-                    if let prev = prevBuffer {
-                        let diff = mseVImage(grayBuffer, prev)
-                        if diff > 1.0 {
-                            let delta = time - frameTimes[lastChange].1
-                            frameTimes.append((index, time, true, delta))
-                            lastChange = index
-                        } else {
-                            frameTimes.append((index, time, false, 0))
-                        }
-                        free(prev.data)
-                    } else {
-                        frameTimes.append((index, time, true, 0))
-                        lastChange = index
-                    }
-
-                    prevBuffer = bufferCopy
-                    index += 1
-                } else {
-                    print("⚠️ Grayscale conversion error: \(error)")
+                    timestamps.append(CMTimeGetSeconds(pts))
+                    CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly)
                 }
 
-                free(grayBuffer.data)
+                log("🧠 Analyzing frame deltas in parallel...")
+
+                let queue = DispatchQueue(label: "compareQueue", attributes: .concurrent)
+                let group = DispatchGroup()
+                var diffs = Array(repeating: 0.0, count: frames.count)
+
+                for i in 1..<frames.count {
+                    queue.async(group: group) {
+                        diffs[i] = mseVImage(frames[i], frames[i - 1])
+                    }
+                }
+                group.wait()
+
+                var lastChange = 0
+                for i in 0..<diffs.count {
+                    let time = timestamps[i]
+                    let diff = diffs[i]
+                    var isSceneChange = diff > 1.0
+
+                    if detectTearing && i > 0 && i < frames.count - 1 {
+                        let height = Int(frames[i].height)
+                        let width = Int(frames[i].width)
+                        let rowBytes = frames[i].rowBytes
+                        let sliceCount = 8
+                        let sliceHeight = height / sliceCount
+
+                        var matchPrev = 0
+                        var matchNext = 0
+
+                        for s in 0..<sliceCount {
+                            let y = s * sliceHeight
+                            let offset = y * rowBytes
+                            let size = (s == sliceCount - 1) ? (height - y) * rowBytes : sliceHeight * rowBytes
+
+                            let curr = vImage_Buffer(data: frames[i].data + offset, height: vImagePixelCount(sliceHeight), width: vImagePixelCount(width), rowBytes: rowBytes)
+                            let prev = vImage_Buffer(data: frames[i - 1].data + offset, height: vImagePixelCount(sliceHeight), width: vImagePixelCount(width), rowBytes: rowBytes)
+                            let next = vImage_Buffer(data: frames[i + 1].data + offset, height: vImagePixelCount(sliceHeight), width: vImagePixelCount(width), rowBytes: rowBytes)
+
+                            let msePrev = mseVImage(curr, prev)
+                            let mseNext = mseVImage(curr, next)
+
+                            if msePrev < 5.0 { matchPrev += 1 }
+                            if mseNext < 5.0 { matchNext += 1 }
+                        }
+
+                        if (matchPrev > 0 || matchNext > 0) && (matchPrev + matchNext < sliceCount) {
+                            isSceneChange = false
+                            print("🧩 Tearing detected at frame \(i): matchPrev=\(matchPrev), matchNext=\(matchNext)")
+                        }
+                    }
+
+
+
+                    if isSceneChange {
+                        let delta = time - timestamps[lastChange]
+                        frameTimes.append((i, time, true, delta))
+                        lastChange = i
+                    } else {
+                        frameTimes.append((i, time, false, 0))
+                    }
+                }
+                frames.forEach { free($0.data) }
+
+            } else {
+                log("🧠 Analyzing frame deltas sequentially...")
+                var prevBuffer: vImage_Buffer? = nil
+                var index = 0
+                var lastChange = 0
+
+                var frames: [vImage_Buffer] = []
+                var timestamps: [Double] = []
+
+                let analysisAsset = AVAsset(url: URL(fileURLWithPath: videoPath))
+                guard let analysisTrack = analysisAsset.tracks(withMediaType: .video).first else {
+                    log("❌ Could not get video track for sequential analysis.")
+                    return outputLog
+                }
+                guard let analysisReader = try? AVAssetReader(asset: analysisAsset) else {
+                    log("❌ Could not create AVAssetReader for sequential analysis.")
+                    return outputLog
+                }
+                let analysisOutput = AVAssetReaderTrackOutput(track: analysisTrack, outputSettings: [
+                    kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
+                ])
+                guard analysisReader.canAdd(analysisOutput) else {
+                    fatalError("❌ Cannot add analysisOutput to reader")
+                }
+                analysisReader.add(analysisOutput)
+                analysisReader.startReading()
+
+                while let sampleBuffer = analysisOutput.copyNextSampleBuffer(),
+                      let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
+
+                    CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
+                    let width = CVPixelBufferGetWidth(imageBuffer)
+                    let height = CVPixelBufferGetHeight(imageBuffer)
+                    let baseAddress = CVPixelBufferGetBaseAddress(imageBuffer)!
+                    let rowBytes = CVPixelBufferGetBytesPerRow(imageBuffer)
+
+                    var buffer = vImage_Buffer(data: baseAddress, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: rowBytes)
+
+                    var grayBuffer = vImage_Buffer()
+                    let grayRowBytes = width
+                    grayBuffer.data = malloc(height * grayRowBytes)
+                    grayBuffer.height = vImagePixelCount(height)
+                    grayBuffer.width = vImagePixelCount(width)
+                    grayBuffer.rowBytes = grayRowBytes
+
+                    let matrix: [Int16] = [54, 183, 19, 0]
+                    let divisor: Int32 = 256
+                    let error = vImageMatrixMultiply_ARGB8888ToPlanar8(&buffer, &grayBuffer, matrix, divisor, nil, 0, vImage_Flags(kvImageNoFlags))
+
+                    CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly)
+
+                    if error == kvImageNoError {
+                        let bufferCopy = grayBuffer.deepCopy()
+                        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+                        let time = CMTimeGetSeconds(pts)
+
+                        var isSceneChange = true
+                        if let prev = prevBuffer {
+                            let diff = mseVImage(grayBuffer, prev)
+                            isSceneChange = diff > 1.0
+
+                            if detectTearing && index > 0 && index < frames.count {
+                                let height = Int(grayBuffer.height)
+                                let width = Int(grayBuffer.width)
+                                let rowBytes = grayBuffer.rowBytes
+                                let sliceCount = 8
+                                let sliceHeight = height / sliceCount
+
+                                var matchPrev = 0
+
+                                for s in 0..<sliceCount {
+                                    let y = s * sliceHeight
+                                    let offset = y * rowBytes
+                                    let size = (s == sliceCount - 1) ? (height - y) * rowBytes : sliceHeight * rowBytes
+
+                                    let curr = vImage_Buffer(data: grayBuffer.data + offset, height: vImagePixelCount(sliceHeight), width: vImagePixelCount(width), rowBytes: rowBytes)
+                                    let prevSlice = vImage_Buffer(data: prev.data + offset, height: vImagePixelCount(sliceHeight), width: vImagePixelCount(width), rowBytes: rowBytes)
+
+                                    let mse = mseVImage(curr, prevSlice)
+                                    if mse < 5.0 { matchPrev += 1 }
+                                }
+
+                                if matchPrev > 0 && matchPrev < sliceCount {
+                                    isSceneChange = false
+                                    print("🧩 Tearing detected at frame \(index): matchPrev=\(matchPrev)")
+                                }
+                            }
+
+
+                            if isSceneChange {
+                                let delta = time - frameTimes[lastChange].1
+                                frameTimes.append((index, time, true, delta))
+                                lastChange = index
+                            } else {
+                                frameTimes.append((index, time, false, 0))
+                            }
+                            free(prev.data)
+                        } else {
+                            frameTimes.append((index, time, true, 0))
+                            lastChange = index
+                        }
+
+                        prevBuffer = bufferCopy
+                        index += 1
+                    } else {
+                        print("⚠️ Grayscale conversion error: \(error)")
+                    }
+                    free(grayBuffer.data)
+                }
+
+                if let last = prevBuffer {
+                    free(last.data)
+                }
             }
 
-            if let last = prevBuffer {
-                free(last.data)
-            }
+            log("✅ Processed \(frameTimes.count) frames")
 
-        }
-        
-        log("✅ Processed \(frameTimes.count) frames")
-        
-        // Extract timestamps of all scene changes
-        let changedTimestamps = frameTimes.filter { $0.2 }.map { $0.1 }
-        
-        // Calculate average FPS based on changed frames
-        let avgFPS: Double
-        if let first = changedTimestamps.first,
-           let last = changedTimestamps.last,
-           changedTimestamps.count > 1 {
-            let duration = last - first
-            let count = changedTimestamps.count - 1
-            avgFPS = Double(count) / duration
-        } else {
-            avgFPS = 0
-        }
+            let changedTimestamps = frameTimes.filter { $0.2 }.map { $0.1 }
+
+            let avgFPS: Double
+            if let first = changedTimestamps.first,
+               let last = changedTimestamps.last,
+               changedTimestamps.count > 1 {
+                let duration = last - first
+                let count = changedTimestamps.count - 1
+                avgFPS = Double(count) / duration
+            } else {
+                avgFPS = 0
+            }
         
         // Calculate min and max FPS from delta values
         let validTimes = frameTimes.compactMap { $0.3 > 0 ? $0.3 : nil }

@@ -14,6 +14,7 @@ struct AppConfig: Codable {
     var csvExportPath: String
     var exportGraph: Bool
     var graphType: String
+    var tearingDetection: Bool
 }
 
 struct ContentView: View {
@@ -35,6 +36,8 @@ struct ContentView: View {
 
     @State private var processingDuration = 0
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    
+    @State private var tearingDetection = false
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
@@ -60,6 +63,9 @@ struct ContentView: View {
                         .multilineTextAlignment(.center)
                         .padding(.horizontal)
                 }
+                
+                Toggle("Tearing Detection (in development)", isOn: $tearingDetection)
+                    .padding(.horizontal, 40)
 
                 Toggle("Measure Processing Time", isOn: $measureProcessingTime)
                     .padding(.horizontal, 40)
@@ -202,7 +208,8 @@ struct ContentView: View {
                 reportStats: reportStatistics,
                 statsMode: statisticsType,
                 exportGraph: exportGraph,
-                graphType: graphType
+                graphType: graphType,
+                detectTearing: tearingDetection
             ) { result in
                 DispatchQueue.main.async {
                     self.outputText = result
@@ -228,7 +235,9 @@ struct ContentView: View {
             statisticsType: statisticsType,
             csvExportPath: csvExportPath,
             exportGraph: exportGraph,
-            graphType: graphType
+            graphType: graphType,
+            tearingDetection: tearingDetection
+            
         )
         if let data = try? JSONEncoder().encode(config) {
             let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("frametool_config.json")
@@ -246,6 +255,7 @@ struct ContentView: View {
             exportGraph = config.exportGraph
             graphType = config.graphType
             csvExportPath = config.csvExportPath
+            tearingDetection = config.tearingDetection
         }
     }
 }
