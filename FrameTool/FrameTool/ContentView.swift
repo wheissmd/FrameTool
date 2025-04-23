@@ -20,6 +20,7 @@ struct AppConfig: Codable {
 struct ContentView: View {
     @State private var isAnalyzing = false
     @State private var isRunning = false
+    @State private var progressStage: String = ""
     @State private var multithreadingEnabled = false
     @State private var measureProcessingTime = false
     @State private var csvExportPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.path
@@ -151,13 +152,32 @@ struct ContentView: View {
                 .padding(.bottom, 5)
 
                 if isAnalyzing {
-                    VStack(spacing: 8) {
+                    VStack(spacing: 4) {
                         ProgressView()
+                            .scaleEffect(1.2)
+
                         Text("Analyzing...")
                             .foregroundColor(.gray)
+                            .font(.subheadline)
+
+                        //let stageMessage = String(progressStage)
+                        //if !stageMessage.isEmpty {
+                            //Text(stageMessage)
+                                //.foregroundColor(.gray)
+                                //.font(.caption)
+                        //}
                     }
-                    .padding()
-                } else {
+                    //.padding(.top, 12)
+                }
+
+
+
+
+
+
+
+
+                else {
                     ScrollView {
                         Text(outputText)
                             .font(.system(size: 12, design: .monospaced))
@@ -170,6 +190,8 @@ struct ContentView: View {
                 Spacer()
             }
             .frame(width: 600, height: 760)
+            .disabled(isAnalyzing)
+            .disabled(isAnalyzing)
             .padding()
             .onAppear {
                 loadConfig()

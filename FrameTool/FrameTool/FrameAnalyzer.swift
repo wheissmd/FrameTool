@@ -331,7 +331,7 @@ public struct FrameAnalyzer {
             }
         }
         
-        // Export interactive HTML graph using Plotly
+        // Export graph
         if exportGraph {
             // Collect frametime graph data
             let timeValues = frameTimes
