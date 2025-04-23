@@ -146,7 +146,7 @@ public struct FrameAnalyzer {
                         if (matchPrev > 0 || matchNext > 0) && (matchPrev + matchNext < sliceCount) {
                             consecutiveTearing += 1
                             isSceneChange = (consecutiveTearing % 2 == 0)
-                            print("🧩 Tearing detected at frame \(i): matchPrev=\(matchPrev), matchNext=\(matchNext), consecutive=\(consecutiveTearing)")
+                            print("Tearing detected at frame \(i): matchPrev=\(matchPrev), matchNext=\(matchNext), consecutive=\(consecutiveTearing)")
                         } else {
                             consecutiveTearing = 0
                         }
@@ -241,7 +241,7 @@ public struct FrameAnalyzer {
                                 if matchPrev > 0 && matchPrev < sliceCount {
                                     consecutiveTearing += 1
                                     isSceneChange = (consecutiveTearing % 2 == 0)
-                                    print("🧩 Tearing detected at frame \(index): matchPrev=\(matchPrev), consecutive=\(consecutiveTearing)")
+                                    print("Tearing detected at frame \(index): matchPrev=\(matchPrev), consecutive=\(consecutiveTearing)")
                                 } else {
                                     consecutiveTearing = 0
                                 }
@@ -615,7 +615,7 @@ public struct FrameAnalyzer {
                    let pngData = rep.representation(using: .png, properties: [:]) {
                     do {
                         try pngData.write(to: imageOutputPath)
-                        //log("📸 Saved image graph to \(imageOutputPath.path)")
+                        
                         
 
                     } catch {
@@ -628,7 +628,6 @@ public struct FrameAnalyzer {
             }
                 // Video with overlay render
             else if graphType == "Animated Overlay" {
-                
                 let outputVideoURL = URL(fileURLWithPath: outputPath).appendingPathComponent("frametime_overlay.mov")
                 if FileManager.default.fileExists(atPath: outputVideoURL.path) {
                     try? FileManager.default.removeItem(at: outputVideoURL)
@@ -644,7 +643,6 @@ public struct FrameAnalyzer {
                 let nominalFrameRate = readerTrack.nominalFrameRate
                 let durationSeconds = asset.duration.seconds
                 let totalFramesToWrite = Int(durationSeconds * Double(nominalFrameRate))
-                let frameDuration = CMTime(value: 1, timescale: CMTimeScale(nominalFrameRate))
                 let imageSize = CGSize(width: Int(renderSize.width), height: Int(renderSize.height))
                 let windowDuration: Double = 5.0
 
@@ -661,14 +659,12 @@ public struct FrameAnalyzer {
 
                 let writerInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
                 let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: writerInput, sourcePixelBufferAttributes: [
-                    kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32ARGB),
+                    kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
                     kCVPixelBufferWidthKey as String: Int(imageSize.width),
                     kCVPixelBufferHeightKey as String: Int(imageSize.height)
                 ])
-
                 writer.add(writerInput)
 
-                // Use a separate reader for overlay rendering
                 let overlayAsset = AVAsset(url: URL(fileURLWithPath: videoPath))
                 guard let overlayTrack = overlayAsset.tracks(withMediaType: .video).first else {
                     log("❌ Could not get overlay video track.")
@@ -679,14 +675,15 @@ public struct FrameAnalyzer {
                 let overlayOutput = AVAssetReaderTrackOutput(track: overlayTrack, outputSettings: [
                     kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
                 ])
-
                 overlayReader.add(overlayOutput)
                 overlayReader.startReading()
-
 
                 let frameDeltaValues: [(Double, Double)] = frameTimes
                     .filter { $0.2 && $0.3 > 0 }
                     .map { ($0.1, $0.3) }
+
+                let metalDevice = MTLCreateSystemDefaultDevice()!
+                let ciContext = CIContext(mtlDevice: metalDevice)
 
                 writer.startWriting()
                 writer.startSession(atSourceTime: .zero)
@@ -707,50 +704,61 @@ public struct FrameAnalyzer {
                                 return
                             }
 
+                            guard overlayReader.status == .reading,
+      let sampleBuffer = overlayOutput.copyNextSampleBuffer(),
+      let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+    if overlayReader.status == .completed {
+        writerInput.markAsFinished()
+        writer.finishWriting {
+            onComplete(outputLog)
+        }
+        return
+    }
+
+                                if overlayReader.status == .completed || overlayReader.status == .reading {
+                                    writerInput.markAsFinished()
+                                    writer.finishWriting {
+                                        onComplete(outputLog)
+                                    }
+                                } else {
+                                    log("❌ OverlayReader error: \(overlayReader.error?.localizedDescription ?? "Unknown error")")
+                                    onComplete(outputLog)
+                                }
+                                return
+                            }
+
                             var pixelBuffer: CVPixelBuffer?
                             CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &pixelBuffer)
 
-                            if let buffer = pixelBuffer {
-                                CVPixelBufferLockBaseAddress(buffer, [])
-                                let baseAddress = CVPixelBufferGetBaseAddress(buffer)
-                                let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
-                                let colorSpace = CGColorSpaceCreateDeviceRGB()
+                            guard let buffer = pixelBuffer else {
+                                frameCount += 1
+                                return
+                            }
 
-                                let context = CGContext(
-                                    data: baseAddress,
-                                    width: Int(imageSize.width),
-                                    height: Int(imageSize.height),
-                                    bitsPerComponent: 8,
-                                    bytesPerRow: bytesPerRow,
-                                    space: colorSpace,
-                                    bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
-                                )
+                            CVPixelBufferLockBaseAddress(buffer, [])
+                            let baseAddress = CVPixelBufferGetBaseAddress(buffer)
+                            let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
+                            let colorSpace = CGColorSpaceCreateDeviceRGB()
 
-                                if let ctx = context {
-                                    // Draw original frame
-                                    guard overlayReader.status == .reading,
-                                          let sampleBuffer = overlayOutput.copyNextSampleBuffer(),
-                                          let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+                            guard let ctx = CGContext(
+                                data: baseAddress,
+                                width: Int(imageSize.width),
+                                height: Int(imageSize.height),
+                                bitsPerComponent: 8,
+                                bytesPerRow: bytesPerRow,
+                                space: colorSpace,
+                                bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
 
-                                        if overlayReader.status == .completed || overlayReader.status == .reading {
-                                            writerInput.markAsFinished()
-                                            writer.finishWriting {
-                                                onComplete(outputLog)
-                                            }
-                                        } else {
-                                            log("❌ OverlayReader error: \(overlayReader.error?.localizedDescription ?? "Unknown error")")
-                                            onComplete(outputLog)
-                                        }
-                                        return
-                                    }
+                            ) else {
+                                CVPixelBufferUnlockBaseAddress(buffer, [])
+                                frameCount += 1
+                                return
+                            }
 
-
-                                    let bgImage = CIImage(cvPixelBuffer: imageBuffer)
-
-                                    let ciContext = CIContext()
-                                    if let cgImage = ciContext.createCGImage(bgImage, from: bgImage.extent) {
-                                        ctx.draw(cgImage, in: CGRect(origin: .zero, size: imageSize))
-                                    }
+                            let baseCI = CIImage(cvPixelBuffer: imageBuffer)
+                            if let cgImage = ciContext.createCGImage(baseCI, from: baseCI.extent) {
+                                ctx.draw(cgImage, in: CGRect(origin: .zero, size: imageSize))
+                            }
 
                                     // --- Layout ---
                                     let graphPadding: CGFloat = 60
@@ -765,19 +773,19 @@ public struct FrameAnalyzer {
                                     let xScale = graphWidth / CGFloat(windowDuration)
 
                                     // === Frametime Graph ===
-                                    let visiblePoints = frameDeltaValues.filter {
+                                    let currentVisiblePoints = frameDeltaValues.filter {
                                         $0.0 >= currentTime - windowDuration && $0.0 <= currentTime
                                     }
 
-                                    let maxDelta = visiblePoints.map { $0.1 }.max() ?? 1
-                                    let minDelta: Double = 0  // always start at 0 now
+                                    let maxDelta = currentVisiblePoints.map { $0.1 }.max() ?? 1
+                                    let minDelta: Double = 0
                                     let yScaleFT = graphHeight / CGFloat(maxDelta - minDelta)
 
                                     ctx.setStrokeColor(NSColor.green.cgColor)
                                     ctx.setLineWidth(2.5)
                                     ctx.beginPath()
 
-                                    for (i, (timestamp, delta)) in visiblePoints.enumerated() {
+                                    for (i, (timestamp, delta)) in currentVisiblePoints.enumerated() {
                                         let x = offsetX + CGFloat(timestamp - (currentTime - windowDuration)) * xScale
                                         let y = ftGraphY + CGFloat(delta - minDelta) * yScaleFT
                                         if i == 0 {
@@ -963,24 +971,10 @@ public struct FrameAnalyzer {
                                         CTLineDraw(CTLineCreateWithAttributedString(attrText), ctx)
                                     }
 
+                            CVPixelBufferUnlockBaseAddress(buffer, [])
 
-
-
-
-
-
-                                    
-                                }
-
-
-
-
-                                CVPixelBufferUnlockBaseAddress(buffer, [])
-
-                                let presentationTime = CMTime(value: CMTimeValue(frameCount), timescale: CMTimeScale(nominalFrameRate))
-                                adaptor.append(buffer, withPresentationTime: presentationTime)
-                            }
-
+                            let presentationTime = CMTime(value: CMTimeValue(frameCount), timescale: CMTimeScale(nominalFrameRate))
+                            adaptor.append(buffer, withPresentationTime: presentationTime)
                             frameCount += 1
                         }
                     }
@@ -988,22 +982,26 @@ public struct FrameAnalyzer {
                     if frameCount >= totalFramesToWrite {
                         writerInput.markAsFinished()
                         writer.finishWriting {
-                            //let retries = 10
-                            var attempts = 0
-                            //while attempts < retries {
-                                if FileManager.default.isReadableFile(atPath: outputVideoURL.path),
-                                   AVAsset(url: outputVideoURL).isPlayable {
-                                    onComplete(outputLog)
-                                    return
-                                } else {
-                                    Thread.sleep(forTimeInterval: 1.0)
-                                    attempts += 1
-                                }
-                            //}
-
                             onComplete(outputLog)
                         }
                     }
+                
+            
+
+
+
+
+
+
+                                    
+                                
+
+
+
+
+                        
+
+                    
                 }
             }
 
@@ -1084,7 +1082,8 @@ public struct FrameAnalyzer {
                 bitsPerComponent: 8,
                 bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
                 space: CGColorSpaceCreateDeviceRGB(),
-                bitmapInfo: CGImageAlphaInfo.noneSkipFirst.rawValue
+                bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+
             )
 
             if let ctx = context {
@@ -1095,7 +1094,19 @@ public struct FrameAnalyzer {
             return buffer
         }
 
-        
+            func safeFinishWriting(_ writer: AVAssetWriter, _ writerInput: AVAssetWriterInput, _ outputURL: URL, _ outputLog: String, _ onComplete: @escaping (String) -> Void) {
+                if writer.status == .writing {
+                    writerInput.markAsFinished()
+                    writer.finishWriting {
+                        onComplete(outputLog)
+                    }
+                } else {
+                    print("⚠️ Tried to finish writing but writer was not in .writing state (status: \(writer.status.rawValue))")
+                    onComplete(outputLog)
+                }
+            }
+
+            
         /// Calculates mean squared error (MSE) between two grayscale images
         func mseVImage(_ img1: vImage_Buffer, _ img2: vImage_Buffer) -> Double {
             guard img1.width == img2.width && img1.height == img2.height else {

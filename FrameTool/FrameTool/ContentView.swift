@@ -64,7 +64,7 @@ struct ContentView: View {
                         .padding(.horizontal)
                 }
                 
-                Toggle("Tearing Detection (in development)", isOn: $tearingDetection)
+                Toggle("Tearing Detection (Experimental)", isOn: $tearingDetection)
                     .padding(.horizontal, 40)
 
                 Toggle("Measure Processing Time", isOn: $measureProcessingTime)
