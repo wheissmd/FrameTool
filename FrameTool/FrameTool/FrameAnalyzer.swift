@@ -289,12 +289,44 @@ public struct FrameAnalyzer {
                 avgFPS = 0
             }
         
-        // Calculate min and max FPS from delta values
+            
+            func generateFPSBuckets(from frameDeltaValues: [(Double, Double)], step: Double = 0.25) -> [(time: Double, fps: Double)] {
+                var fpsBuckets: [(Double, Double)] = []
+                guard let maxTime = frameDeltaValues.map(\.0).max() else { return fpsBuckets }
+                
+                var bucketTime: Double = 0.0
+                while bucketTime < maxTime {
+                    let next = bucketTime + step
+                    let timestamps = frameDeltaValues
+                        .filter { $0.0 >= bucketTime && $0.0 < next }
+                        .map { $0.0 }
+                    
+                    let fps: Double
+                    if timestamps.count >= 2 {
+                        let duration = timestamps.last! - timestamps.first!
+                        fps = duration > 0 ? Double(timestamps.count - 1) / duration : 0
+                    } else {
+                        fps = Double(timestamps.count)
+                    }
+                    
+                    fpsBuckets.append((time: bucketTime, fps: fps))
+                    bucketTime = next
+                }
+                
+                return fpsBuckets
+            }
+
+            
+        // Calculate min and max FPS from fps bucket
         let validTimes = frameTimes.compactMap { $0.3 > 0 ? $0.3 : nil }
         let fpsList = validTimes.map { 1.0 / $0 }
-        let minFPS = fpsList.min() ?? 0
-        let maxFPS = fpsList.max() ?? 0
+        let fpsBuckets = generateFPSBuckets(from: frameTimes.filter { $0.2 && $0.3 > 0 }.map { ($0.1, $0.3) })
+        let minFPS = fpsBuckets.map(\.fps).min() ?? 0
+        let maxFPS = fpsBuckets.map(\.fps).max() ?? 0
+
         
+            
+            
         log("📊 Average FPS: \(String(format: "%.2f", avgFPS))")
         log("📊 Min FPS: \(String(format: "%.2f", minFPS))")
         log("📊 Max FPS: \(String(format: "%.2f", maxFPS))")
