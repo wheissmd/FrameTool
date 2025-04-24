@@ -73,6 +73,7 @@ public struct FrameAnalyzer {
                 log("📦 Loading frames into memory...")
                 var frames: [vImage_Buffer] = []
                 var timestamps: [Double] = []
+                
 
                 while let sampleBuffer = readerOutput.copyNextSampleBuffer(),
                       let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
@@ -118,7 +119,7 @@ public struct FrameAnalyzer {
                     let diff = diffs[i]
                     var isSceneChange = diff > 1.0
 
-                    if detectTearing && i > 0 && i < frames.count - 1 {
+                    if detectTearing && i > 0 {
                         let height = Int(frames[i].height)
                         let width = Int(frames[i].width)
                         let rowBytes = frames[i].rowBytes
@@ -126,32 +127,38 @@ public struct FrameAnalyzer {
                         let sliceHeight = height / sliceCount
 
                         var matchPrev = 0
-                        var matchNext = 0
 
                         for s in 0..<sliceCount {
                             let y = s * sliceHeight
                             let offset = y * rowBytes
 
-                            let curr = vImage_Buffer(data: frames[i].data + offset, height: vImagePixelCount(sliceHeight), width: vImagePixelCount(width), rowBytes: rowBytes)
-                            let prev = vImage_Buffer(data: frames[i - 1].data + offset, height: vImagePixelCount(sliceHeight), width: vImagePixelCount(width), rowBytes: rowBytes)
-                            let next = vImage_Buffer(data: frames[i + 1].data + offset, height: vImagePixelCount(sliceHeight), width: vImagePixelCount(width), rowBytes: rowBytes)
+                            let curr = vImage_Buffer(data: frames[i].data + offset,
+                                                     height: vImagePixelCount(sliceHeight),
+                                                     width: vImagePixelCount(width),
+                                                     rowBytes: rowBytes)
+
+                            let prev = vImage_Buffer(data: frames[i - 1].data + offset,
+                                                     height: vImagePixelCount(sliceHeight),
+                                                     width: vImagePixelCount(width),
+                                                     rowBytes: rowBytes)
 
                             let msePrev = mseVImage(curr, prev)
-                            let mseNext = mseVImage(curr, next)
-
-                            if msePrev < 5.0 { matchPrev += 1 }
-                            if mseNext < 5.0 { matchNext += 1 }
+                            if msePrev < 5.0 && !isRegionBlack(curr) {
+                                matchPrev += 1
+                            }
                         }
-
-                        if (matchPrev > 0 || matchNext > 0) && (matchPrev + matchNext < sliceCount) {
+                        if matchPrev > 0 && matchPrev < sliceCount {
                             consecutiveTearing += 1
                             isSceneChange = (consecutiveTearing % 2 == 0)
-                            print("Tearing detected at frame \(i): matchPrev=\(matchPrev), matchNext=\(matchNext), consecutive=\(consecutiveTearing)")
+                            print("Tearing detected at frame \(i): matchPrev=\(matchPrev), consecutive=\(consecutiveTearing)")
                         } else {
                             consecutiveTearing = 0
                         }
-                    }
 
+                    }
+                    
+
+                    
                     if isSceneChange {
                         let delta = time - timestamps[lastChange]
                         frameTimes.append((i, time, true, delta))
@@ -235,7 +242,7 @@ public struct FrameAnalyzer {
                                     let prevSlice = vImage_Buffer(data: prev.data + offset, height: vImagePixelCount(sliceHeight), width: vImagePixelCount(width), rowBytes: rowBytes)
 
                                     let mse = mseVImage(curr, prevSlice)
-                                    if mse < 5.0 { matchPrev += 1 }
+                                    if mse < 5.0 && !isRegionBlack(curr) { matchPrev += 1 }
                                 }
 
                                 if matchPrev > 0 && matchPrev < sliceCount {
@@ -1138,6 +1145,124 @@ public struct FrameAnalyzer {
                 }
             }
 
+          
+            //Detects whether identified tearing wrong
+            func isRegionBlack(_ buffer: vImage_Buffer) -> Bool {
+                let pixels = buffer.data.assumingMemoryBound(to: UInt8.self)
+                let height = Int(buffer.height)
+                let width = Int(buffer.width)
+                let rowBytes = buffer.rowBytes
+
+                var sum: UInt64 = 0
+                var sumSq: UInt64 = 0
+                var count = 0
+
+                var rowLuminanceStart: UInt64 = 0
+                var rowLuminanceEnd: UInt64 = 0
+                var horizontalEdge: Int = 0
+                var verticalEdge: Int = 0
+                var rowMeans: [Float] = Array(repeating: 0.0, count: height)
+
+                for y in 0..<height {
+                    var rowSum: UInt64 = 0
+                    for x in 0..<width {
+                        let offset = y * rowBytes + x
+                        let value = UInt64(pixels[offset])
+                        sum += value
+                        sumSq += value * value
+                        rowSum += value
+                        count += 1
+
+                        if x > 0 {
+                            let left = y * rowBytes + (x - 1)
+                            horizontalEdge += abs(Int(pixels[offset]) - Int(pixels[left]))
+                        }
+
+                        if y > 0 {
+                            let above = (y - 1) * rowBytes + x
+                            verticalEdge += abs(Int(pixels[offset]) - Int(pixels[above]))
+                        }
+                    }
+
+                    rowMeans[y] = Float(rowSum) / Float(width)
+
+                    if y == 0 { rowLuminanceStart = rowSum }
+                    if y == height - 1 { rowLuminanceEnd = rowSum }
+                }
+
+                let mean = Float(sum) / Float(count)
+                let variance = Float(sumSq) / Float(count) - mean * mean
+                let stddev = sqrt(variance)
+                let luminanceGradient = abs(Float(rowLuminanceStart) - Float(rowLuminanceEnd)) / Float(width)
+                let avgEdgeStrength = Float(horizontalEdge + verticalEdge) / Float(2 * width * (height - 1))
+
+                let directionRatio = abs(Float(horizontalEdge - verticalEdge)) / max(1.0, Float(horizontalEdge + verticalEdge))
+
+                // Tearing cues
+                var maxRowJump: Float = 0
+                var midFrameJump: Float = 0
+                for i in 1..<height {
+                    let jump = abs(rowMeans[i] - rowMeans[i - 1])
+                    if jump > maxRowJump { maxRowJump = jump }
+                    if abs(i - height / 2) < height / 6 {
+                        if jump > midFrameJump { midFrameJump = jump }
+                    }
+                }
+
+                // Adaptive lowTexture
+                let contrastBoostedEdge = avgEdgeStrength / (stddev + 1.0)
+                let lowTexture = contrastBoostedEdge < 0.04
+
+                let isDark = mean < 16.0
+                let isFlat = stddev < 6.0
+                let baseBlack = isDark && isFlat && lowTexture
+
+                let strongTearLine = maxRowJump > 2.5 || midFrameJump > 1.5
+
+                // New fallback cue for strong visual signal
+                let strongVisualCue = stddev > 20.0 || avgEdgeStrength > 1.0 || luminanceGradient > 10.0
+
+                let shouldBlock = !strongTearLine && !strongVisualCue
+
+                print("""
+                [Filter Debug]
+                mean: \(mean), stddev: \(stddev), luminanceGradient: \(luminanceGradient)
+                avgEdgeStrength: \(avgEdgeStrength), contrastBoostedEdge: \(contrastBoostedEdge), directionRatio: \(directionRatio)
+                maxRowJump: \(maxRowJump), midFrameJump: \(midFrameJump)
+                isDark: \(isDark), isFlat: \(isFlat), lowTexture: \(lowTexture)
+                baseBlack: \(baseBlack), strongTearLine: \(strongTearLine), strongVisualCue: \(strongVisualCue)
+                -> shouldBlock: \(shouldBlock)
+                """)
+
+                return shouldBlock
+            }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            
             
         /// Calculates mean squared error (MSE) between two grayscale images
         func mseVImage(_ img1: vImage_Buffer, _ img2: vImage_Buffer) -> Double {
