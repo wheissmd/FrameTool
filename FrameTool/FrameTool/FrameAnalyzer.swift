@@ -941,7 +941,7 @@ public struct FrameAnalyzer {
                                     CTLineDraw(CTLineCreateWithAttributedString(fpsGraphText), ctx)
                                     
                                     // === Frametime Y-axis scale marks ===
-                                    let uniqueFTValues = Set(visiblePoints.map { round($0.1 * 10000) / 10 })  // round to 0.1ms
+                                    let uniqueFTValues = Set(visiblePoints.map { round($0.1 * 10000) / 10 })
 
                                     let ftRange = maxDelta - minDelta
                                     let frametimeGraphHeight: CGFloat = graphHeight
@@ -1217,7 +1217,12 @@ public struct FrameAnalyzer {
                 let isFlat = stddev < 6.0
                 let baseBlack = isDark && isFlat && lowTexture
 
-                let strongTearLine = maxRowJump > 2.5 || midFrameJump > 1.5
+                let baseThreshold: Float = 1.5
+                let adaptiveBoost = min(stddev / 8.0, 1.5)
+                let pixelDiffThreshold = baseThreshold + adaptiveBoost
+
+                let strongTearLine = maxRowJump > pixelDiffThreshold || midFrameJump > (pixelDiffThreshold * 0.75)
+
 
                 // New fallback cue for strong visual signal
                 let strongVisualCue = stddev > 20.0 || avgEdgeStrength > 1.0 || luminanceGradient > 10.0
