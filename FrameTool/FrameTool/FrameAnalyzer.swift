@@ -371,49 +371,49 @@ public struct FrameAnalyzer {
         }
         
         // Export graph
-        if exportGraph {
-            // Collect frametime graph data
-            let timeValues = frameTimes
-                .filter { $0.3 > 0 }
-                .map { String(format: "%.4f", $0.1) }
-            
-            let deltaValues = frameTimes
-                .filter { $0.3 > 0 }
-                .map { String(format: "%.4f", $0.3 * 1000.0) }
-            
-            // Collect FPS data per 1/4 second
-            var fpsDict = [Double: [Double]]()
-
-            for (_, timestamp, isChange, delta) in frameTimes where isChange && delta > 0.0 {
-                let bucket = Double(Int(timestamp / 0.25)) * 0.25
-                fpsDict[bucket, default: []].append(timestamp)
-            }
-
-            var fpsTimeValues: [Double] = []
-            var fpsValues: [Double] = []
-
-            for (bucketStart, timestamps) in fpsDict.sorted(by: { $0.key < $1.key }) {
-                guard timestamps.count >= 2 else {
-                    fpsTimeValues.append(bucketStart)
-                    fpsValues.append(Double(timestamps.count))  // fallback to count if only 1 frame
-                    continue
+            if exportGraph {
+                // Collect frametime graph data
+                let timeValues = frameTimes
+                    .filter { $0.3 > 0 }
+                    .map { String(format: "%.4f", $0.1) }
+                
+                let deltaValues = frameTimes
+                    .filter { $0.3 > 0 }
+                    .map { String(format: "%.4f", $0.3 * 1000.0) }
+                
+                // Collect FPS data per 1/4 second
+                var fpsDict = [Double: [Double]]()
+                
+                for (_, timestamp, isChange, delta) in frameTimes where isChange && delta > 0.0 {
+                    let bucket = Double(Int(timestamp / 0.25)) * 0.25
+                    fpsDict[bucket, default: []].append(timestamp)
                 }
-
-                let duration = timestamps.last! - timestamps.first!
-                let fps = Double(timestamps.count - 1) / duration
-                fpsTimeValues.append(bucketStart)
-                fpsValues.append(fps)
-            }
-
-            
-            let trimmedFpsTime = fpsTimeValues.map { String(format: "%.2f", $0) }
-            let trimmedFpsValues = fpsValues.map { String(format: "%.2f", $0) }
-            
-            let outputHTMLPath = URL(fileURLWithPath: outputPath).appendingPathComponent("frametime_graph.html")
-            let imageOutputPath = URL(fileURLWithPath: outputPath).appendingPathComponent("frametime_graph.png")
-            
-            if graphType == "Interactive" {
-                var htmlContent = """
+                
+                var fpsTimeValues: [Double] = []
+                var fpsValues: [Double] = []
+                
+                for (bucketStart, timestamps) in fpsDict.sorted(by: { $0.key < $1.key }) {
+                    guard timestamps.count >= 2 else {
+                        fpsTimeValues.append(bucketStart)
+                        fpsValues.append(Double(timestamps.count))  // fallback to count if only 1 frame
+                        continue
+                    }
+                    
+                    let duration = timestamps.last! - timestamps.first!
+                    let fps = Double(timestamps.count - 1) / duration
+                    fpsTimeValues.append(bucketStart)
+                    fpsValues.append(fps)
+                }
+                
+                
+                let trimmedFpsTime = fpsTimeValues.map { String(format: "%.2f", $0) }
+                let trimmedFpsValues = fpsValues.map { String(format: "%.2f", $0) }
+                
+                let outputHTMLPath = URL(fileURLWithPath: outputPath).appendingPathComponent("frametime_graph.html")
+                let imageOutputPath = URL(fileURLWithPath: outputPath).appendingPathComponent("frametime_graph.png")
+                
+                if graphType == "Interactive" {
+                    var htmlContent = """
                 <!DOCTYPE html>
                 <html>
                 <head>
@@ -464,583 +464,568 @@ public struct FrameAnalyzer {
                 </body>
                 </html>
                 """
-                
-                do {
-                    try htmlContent.write(to: outputHTMLPath, atomically: true, encoding: .utf8)
                     
-                } catch {
-                    log("⚠️ Error generating interactive graph: \(error.localizedDescription)")
-                    
-                }
-            }
-            
-            else if graphType == "Image" {
-                // Image size: tall and high-res
-                let width = 6000
-                let height = 2000
-                let margin: CGFloat = 100
-                let graphHeight = (height - Int(margin) * 3) / 2
-                
-                let colorBg = NSColor.black
-                let colorLine1 = NSColor.green
-                let colorLine2 = NSColor.systemGreen
-                let colorText = NSColor.white
-                
-                let image = NSImage(size: NSSize(width: width, height: height))
-                image.lockFocus()
-                
-                guard let context = NSGraphicsContext.current?.cgContext else {
-                    log("⚠️ Could not get graphics context for image rendering.")
-                    return "Error"
-                }
-                
-                // Background
-                context.clear(CGRect(x: 0, y: 0, width: width, height: height))
-                
-                // Frametime Graph
-                let deltaYStart = height - Int(margin)
-                let deltaYEnd = deltaYStart - Int(graphHeight)
-                
-                if let minDelta = deltaValues.map({ Double($0)! }).min(),
-                   let maxDelta = deltaValues.map({ Double($0)! }).max() {
-                    let xScale = CGFloat(width - 2 * Int(margin)) / CGFloat(timeValues.count)
-                    let yScale = CGFloat(graphHeight) / CGFloat(maxDelta - minDelta)
-                    
-                    context.setStrokeColor(colorLine1.cgColor)
-                    context.setLineWidth(1.0)
-                    context.beginPath()
-                    
-                    for (index, value) in deltaValues.enumerated() {
-                        let x = margin + CGFloat(index) * xScale
-                        let yVal = CGFloat(Double(value)! - minDelta) * yScale
-                        let y = CGFloat(deltaYEnd) + yVal
-                        
-                        if index == 0 {
-                            context.move(to: CGPoint(x: x, y: y))
-                        } else {
-                            context.addLine(to: CGPoint(x: x, y: y))
-                        }
-                    }
-                    context.strokePath()
-                    
-                    // Frametime Axis Lines & Ticks
-                    context.setStrokeColor(NSColor.gray.cgColor)
-                    context.setLineWidth(1.0)
-                    
-                    // Y-axis line
-                    context.move(to: CGPoint(x: margin, y: CGFloat(deltaYEnd)))
-                    context.addLine(to: CGPoint(x: margin, y: CGFloat(deltaYStart)))
-                    context.strokePath()
-                    
-                    // X-axis line
-                    context.move(to: CGPoint(x: margin, y: CGFloat(deltaYEnd)))
-                    context.addLine(to: CGPoint(x: CGFloat(width) - margin, y: CGFloat(deltaYEnd)))
-                    context.strokePath()
-                    
-                    // Y-axis ticks and labels
-                    let yStep: Double = 5
-                    for yVal in stride(from: minDelta, through: maxDelta, by: yStep) {
-                        let yOffset = CGFloat(yVal - minDelta) * yScale
-                        let y = CGFloat(deltaYEnd) + yOffset
-                        let label = String(format: "%.0f", yVal)
-                        let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 24), .foregroundColor: colorText]
-                        label.draw(at: CGPoint(x: 10, y: y - 12), withAttributes: attributes)
-                    }
-                    
-                    // Shared X-Axis Time Labels
-                    context.setStrokeColor(NSColor.gray.cgColor)
-                    context.setLineWidth(1.0)
-                    
-                    let totalTime = timeValues.last.flatMap { Double($0) } ?? 0.0
-                    let timeStep: Double = 1.0
-                    let pixelsPerSecond = CGFloat(width - Int(2 * margin)) / CGFloat(totalTime)
-                    
-                    for t in stride(from: 0.0, through: totalTime, by: timeStep) {
-                        let x = CGFloat(margin) + CGFloat(t) * pixelsPerSecond
-                        context.move(to: CGPoint(x: Int(x), y: height - Int(margin)))
-                        context.addLine(to: CGPoint(x: Int(x), y: height - Int(margin) + 10))
-                        
-                        let label = String(format: "%.0f", t)
-                        let attributes: [NSAttributedString.Key: Any] = [
-                            .font: NSFont.systemFont(ofSize: 24),
-                            .foregroundColor: colorText
-                        ]
-                        label.draw(at: CGPoint(x: x - 10, y: CGFloat(height) - margin + 14), withAttributes: attributes)
-                    }
-                    context.strokePath()
-                    
-                    
-                    
-                    // Add frametime title
-                    let title = "Frametime (ms)"
-                    let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: 48), .foregroundColor: colorText]
-                    title.draw(at: CGPoint(x: margin, y: CGFloat(deltaYStart + 20)), withAttributes: attrs)
-                    
-                    // Y-axis label
-                    let yLabel = "Frametime (ms)"
-                    let yLabelAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 36), .foregroundColor: colorText]
-                    yLabel.draw(at: CGPoint(x: margin, y: CGFloat(deltaYEnd + 20)), withAttributes: yLabelAttrs)
-                }
-                
-                // FPS Graph
-                let fpsYStart = deltaYEnd - Int(margin)
-                let fpsYEnd = fpsYStart - Int(graphHeight)
-                
-                if let minFps = fpsValues.min(), let maxFps = fpsValues.max() {
-                    let xScale = CGFloat(width - 2 * Int(margin)) / CGFloat(fpsValues.count)
-                    let yScale = CGFloat(graphHeight) / CGFloat(maxFps - minFps)
-                    
-                    context.setStrokeColor(colorLine2.cgColor)
-                    context.setLineWidth(2.0)
-                    context.beginPath()
-                    
-                    for (index, value) in fpsValues.enumerated() {
-                        let x = margin + CGFloat(index) * xScale
-                        let yVal = CGFloat(value - minFps) * yScale
-                        let y = CGFloat(fpsYEnd) + yVal
-                        
-                        if index == 0 {
-                            context.move(to: CGPoint(x: x, y: y))
-                        } else {
-                            context.addLine(to: CGPoint(x: x, y: y))
-                        }
-                    }
-                    context.strokePath()
-                    
-                    // FPS Axis Lines
-                    context.setStrokeColor(NSColor.gray.cgColor)
-                    context.setLineWidth(1.0)
-                    
-                    // Y-axis line
-                    context.move(to: CGPoint(x: margin, y: CGFloat(fpsYEnd)))
-                    context.addLine(to: CGPoint(x: margin, y: CGFloat(fpsYStart)))
-                    context.strokePath()
-                    
-                    // X-axis line
-                    context.move(to: CGPoint(x: margin, y: CGFloat(fpsYEnd)))
-                    context.addLine(to: CGPoint(x: CGFloat(width) - margin, y: CGFloat(fpsYEnd)))
-                    context.strokePath()
-                    
-                    // Y-Axis ticks and labels
-                    let fpsStep: Double = 5.0
-                    for fps in stride(from: minFps, through: maxFps, by: fpsStep) {
-                        let offset = CGFloat(fps - minFps) * yScale
-                        let y = CGFloat(fpsYEnd) + offset
-                        
-                        let label = String(format: "%.0f", fps)
-                        let attributes: [NSAttributedString.Key: Any] = [
-                            .font: NSFont.systemFont(ofSize: 24),
-                            .foregroundColor: colorText
-                        ]
-                        label.draw(at: CGPoint(x: 10, y: y - 10), withAttributes: attributes)
-                    }
-                    
-                    // Add FPS title
-                    let fpsTitle = "Frames Per Second"
-                    let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: 48), .foregroundColor: colorText]
-                    fpsTitle.draw(at: CGPoint(x: margin, y: CGFloat(fpsYStart + 20)), withAttributes: attrs)
-                    
-                    // Y-axis label
-                    let yLabel = "FPS"
-                    let yLabelAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 36), .foregroundColor: colorText]
-                    yLabel.draw(at: CGPoint(x: margin, y: CGFloat(fpsYEnd + 20)), withAttributes: yLabelAttrs)
-                }
-                
-                image.unlockFocus()
-                
-                let imageOutputPath = URL(fileURLWithPath: outputPath).appendingPathComponent("frametime_graph.png")
-                if let data = image.tiffRepresentation,
-                   let rep = NSBitmapImageRep(data: data),
-                   let pngData = rep.representation(using: .png, properties: [:]) {
                     do {
-                        try pngData.write(to: imageOutputPath)
+                        try htmlContent.write(to: outputHTMLPath, atomically: true, encoding: .utf8)
                         
-                        
-
                     } catch {
-                        log("⚠️ Failed to write image: \(error.localizedDescription)")
+                        log("⚠️ Error generating interactive graph: \(error.localizedDescription)")
                         
-
+                    }
+                }
+                
+                else if graphType == "Image" {
+                    // Image size: tall and high-res
+                    let width = 6000
+                    let height = 2000
+                    let margin: CGFloat = 100
+                    let graphHeight = (height - Int(margin) * 3) / 2
+                    
+                    let colorBg = NSColor.black
+                    let colorLine1 = NSColor.green
+                    let colorLine2 = NSColor.systemGreen
+                    let colorText = NSColor.white
+                    
+                    let image = NSImage(size: NSSize(width: width, height: height))
+                    image.lockFocus()
+                    
+                    guard let context = NSGraphicsContext.current?.cgContext else {
+                        log("⚠️ Could not get graphics context for image rendering.")
+                        return "Error"
                     }
                     
-                }
-            }
-                // Video with overlay render
-            else if graphType == "Animated Overlay" {
-                let outputVideoURL = URL(fileURLWithPath: outputPath).appendingPathComponent("frametime_overlay.mov")
-                if FileManager.default.fileExists(atPath: outputVideoURL.path) {
-                    try? FileManager.default.removeItem(at: outputVideoURL)
-                }
-
-                let asset = AVAsset(url: URL(fileURLWithPath: videoPath))
-                guard let readerTrack = asset.tracks(withMediaType: .video).first else {
-                    log("❌ Could not get video track.")
-                    return outputLog
-                }
-
-                let renderSize = readerTrack.naturalSize
-                let nominalFrameRate = readerTrack.nominalFrameRate
-                let durationSeconds = asset.duration.seconds
-                let totalFramesToWrite = Int(durationSeconds * Double(nominalFrameRate))
-                let imageSize = CGSize(width: Int(renderSize.width), height: Int(renderSize.height))
-                let windowDuration: Double = 5.0
-
-                guard let writer = try? AVAssetWriter(outputURL: outputVideoURL, fileType: .mov) else {
-                    log("❌ Failed to create AVAssetWriter for output.")
-                    return outputLog
-                }
-
-                let videoSettings: [String: Any] = [
-                    AVVideoCodecKey: AVVideoCodecType.h264,
-                    AVVideoWidthKey: Int(imageSize.width),
-                    AVVideoHeightKey: Int(imageSize.height)
-                ]
-
-                let writerInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
-                let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: writerInput, sourcePixelBufferAttributes: [
-                    kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
-                    kCVPixelBufferWidthKey as String: Int(imageSize.width),
-                    kCVPixelBufferHeightKey as String: Int(imageSize.height)
-                ])
-                writer.add(writerInput)
-
-                let overlayAsset = AVAsset(url: URL(fileURLWithPath: videoPath))
-                guard let overlayTrack = overlayAsset.tracks(withMediaType: .video).first else {
-                    log("❌ Could not get overlay video track.")
-                    return outputLog
-                }
-
-                let overlayReader = try! AVAssetReader(asset: overlayAsset)
-                let overlayOutput = AVAssetReaderTrackOutput(track: overlayTrack, outputSettings: [
-                    kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
-                ])
-                overlayReader.add(overlayOutput)
-                overlayReader.startReading()
-
-                let frameDeltaValues: [(Double, Double)] = frameTimes
-                    .filter { $0.2 && $0.3 > 0 }
-                    .map { ($0.1, $0.3) }
-
-                let metalDevice = MTLCreateSystemDefaultDevice()!
-                let ciContext = CIContext(mtlDevice: metalDevice)
-
-                writer.startWriting()
-                writer.startSession(atSourceTime: .zero)
-
-                var frameCount = 0
-                let queue = DispatchQueue(label: "overlay.queue")
-
-                writerInput.requestMediaDataWhenReady(on: queue) {
-                    while writerInput.isReadyForMoreMediaData && frameCount < totalFramesToWrite {
-                        autoreleasepool {
-                            let currentTime = Double(frameCount) / Double(nominalFrameRate)
-                            let windowStart = max(0, currentTime - windowDuration)
-                            let windowEnd = currentTime
-
-                            let visiblePoints = frameDeltaValues.filter { $0.0 >= windowStart && $0.0 <= windowEnd }
-                            if visiblePoints.isEmpty {
-                                frameCount += 1
-                                return
+                    // Background
+                    context.clear(CGRect(x: 0, y: 0, width: width, height: height))
+                    
+                    // Frametime Graph
+                    let deltaYStart = height - Int(margin)
+                    let deltaYEnd = deltaYStart - Int(graphHeight)
+                    
+                    if let minDelta = deltaValues.map({ Double($0)! }).min(),
+                       let maxDelta = deltaValues.map({ Double($0)! }).max() {
+                        let xScale = CGFloat(width - 2 * Int(margin)) / CGFloat(timeValues.count)
+                        let yScale = CGFloat(graphHeight) / CGFloat(maxDelta - minDelta)
+                        
+                        context.setStrokeColor(colorLine1.cgColor)
+                        context.setLineWidth(1.0)
+                        context.beginPath()
+                        
+                        for (index, value) in deltaValues.enumerated() {
+                            let x = margin + CGFloat(index) * xScale
+                            let yVal = CGFloat(Double(value)! - minDelta) * yScale
+                            let y = CGFloat(deltaYEnd) + yVal
+                            
+                            if index == 0 {
+                                context.move(to: CGPoint(x: x, y: y))
+                            } else {
+                                context.addLine(to: CGPoint(x: x, y: y))
                             }
-
-                            guard overlayReader.status == .reading,
-      let sampleBuffer = overlayOutput.copyNextSampleBuffer(),
-      let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
-    if overlayReader.status == .completed {
-        writerInput.markAsFinished()
-        writer.finishWriting {
-            onComplete(outputLog)
-        }
-        return
-    }
-
-                                if overlayReader.status == .completed || overlayReader.status == .reading {
-                                    writerInput.markAsFinished()
-                                    writer.finishWriting {
+                        }
+                        context.strokePath()
+                        
+                        // Frametime Axis Lines & Ticks
+                        context.setStrokeColor(NSColor.gray.cgColor)
+                        context.setLineWidth(1.0)
+                        
+                        // Y-axis line
+                        context.move(to: CGPoint(x: margin, y: CGFloat(deltaYEnd)))
+                        context.addLine(to: CGPoint(x: margin, y: CGFloat(deltaYStart)))
+                        context.strokePath()
+                        
+                        // X-axis line
+                        context.move(to: CGPoint(x: margin, y: CGFloat(deltaYEnd)))
+                        context.addLine(to: CGPoint(x: CGFloat(width) - margin, y: CGFloat(deltaYEnd)))
+                        context.strokePath()
+                        
+                        // Y-axis ticks and labels
+                        let yStep: Double = 5
+                        for yVal in stride(from: minDelta, through: maxDelta, by: yStep) {
+                            let yOffset = CGFloat(yVal - minDelta) * yScale
+                            let y = CGFloat(deltaYEnd) + yOffset
+                            let label = String(format: "%.0f", yVal)
+                            let attributes: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 24), .foregroundColor: colorText]
+                            label.draw(at: CGPoint(x: 10, y: y - 12), withAttributes: attributes)
+                        }
+                        
+                        // Shared X-Axis Time Labels
+                        context.setStrokeColor(NSColor.gray.cgColor)
+                        context.setLineWidth(1.0)
+                        
+                        let totalTime = timeValues.last.flatMap { Double($0) } ?? 0.0
+                        let timeStep: Double = 1.0
+                        let pixelsPerSecond = CGFloat(width - Int(2 * margin)) / CGFloat(totalTime)
+                        
+                        for t in stride(from: 0.0, through: totalTime, by: timeStep) {
+                            let x = CGFloat(margin) + CGFloat(t) * pixelsPerSecond
+                            context.move(to: CGPoint(x: Int(x), y: height - Int(margin)))
+                            context.addLine(to: CGPoint(x: Int(x), y: height - Int(margin) + 10))
+                            
+                            let label = String(format: "%.0f", t)
+                            let attributes: [NSAttributedString.Key: Any] = [
+                                .font: NSFont.systemFont(ofSize: 24),
+                                .foregroundColor: colorText
+                            ]
+                            label.draw(at: CGPoint(x: x - 10, y: CGFloat(height) - margin + 14), withAttributes: attributes)
+                        }
+                        context.strokePath()
+                        
+                        
+                        
+                        // Add frametime title
+                        let title = "Frametime (ms)"
+                        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: 48), .foregroundColor: colorText]
+                        title.draw(at: CGPoint(x: margin, y: CGFloat(deltaYStart + 20)), withAttributes: attrs)
+                        
+                        // Y-axis label
+                        let yLabel = "Frametime (ms)"
+                        let yLabelAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 36), .foregroundColor: colorText]
+                        yLabel.draw(at: CGPoint(x: margin, y: CGFloat(deltaYEnd + 20)), withAttributes: yLabelAttrs)
+                    }
+                    
+                    // FPS Graph
+                    let fpsYStart = deltaYEnd - Int(margin)
+                    let fpsYEnd = fpsYStart - Int(graphHeight)
+                    
+                    if let minFps = fpsValues.min(), let maxFps = fpsValues.max() {
+                        let xScale = CGFloat(width - 2 * Int(margin)) / CGFloat(fpsValues.count)
+                        let yScale = CGFloat(graphHeight) / CGFloat(maxFps - minFps)
+                        
+                        context.setStrokeColor(colorLine2.cgColor)
+                        context.setLineWidth(2.0)
+                        context.beginPath()
+                        
+                        for (index, value) in fpsValues.enumerated() {
+                            let x = margin + CGFloat(index) * xScale
+                            let yVal = CGFloat(value - minFps) * yScale
+                            let y = CGFloat(fpsYEnd) + yVal
+                            
+                            if index == 0 {
+                                context.move(to: CGPoint(x: x, y: y))
+                            } else {
+                                context.addLine(to: CGPoint(x: x, y: y))
+                            }
+                        }
+                        context.strokePath()
+                        
+                        // FPS Axis Lines
+                        context.setStrokeColor(NSColor.gray.cgColor)
+                        context.setLineWidth(1.0)
+                        
+                        // Y-axis line
+                        context.move(to: CGPoint(x: margin, y: CGFloat(fpsYEnd)))
+                        context.addLine(to: CGPoint(x: margin, y: CGFloat(fpsYStart)))
+                        context.strokePath()
+                        
+                        // X-axis line
+                        context.move(to: CGPoint(x: margin, y: CGFloat(fpsYEnd)))
+                        context.addLine(to: CGPoint(x: CGFloat(width) - margin, y: CGFloat(fpsYEnd)))
+                        context.strokePath()
+                        
+                        // Y-Axis ticks and labels
+                        let fpsStep: Double = 5.0
+                        for fps in stride(from: minFps, through: maxFps, by: fpsStep) {
+                            let offset = CGFloat(fps - minFps) * yScale
+                            let y = CGFloat(fpsYEnd) + offset
+                            
+                            let label = String(format: "%.0f", fps)
+                            let attributes: [NSAttributedString.Key: Any] = [
+                                .font: NSFont.systemFont(ofSize: 24),
+                                .foregroundColor: colorText
+                            ]
+                            label.draw(at: CGPoint(x: 10, y: y - 10), withAttributes: attributes)
+                        }
+                        
+                        // Add FPS title
+                        let fpsTitle = "Frames Per Second"
+                        let attrs: [NSAttributedString.Key: Any] = [.font: NSFont.boldSystemFont(ofSize: 48), .foregroundColor: colorText]
+                        fpsTitle.draw(at: CGPoint(x: margin, y: CGFloat(fpsYStart + 20)), withAttributes: attrs)
+                        
+                        // Y-axis label
+                        let yLabel = "FPS"
+                        let yLabelAttrs: [NSAttributedString.Key: Any] = [.font: NSFont.systemFont(ofSize: 36), .foregroundColor: colorText]
+                        yLabel.draw(at: CGPoint(x: margin, y: CGFloat(fpsYEnd + 20)), withAttributes: yLabelAttrs)
+                    }
+                    
+                    image.unlockFocus()
+                    
+                    let imageOutputPath = URL(fileURLWithPath: outputPath).appendingPathComponent("frametime_graph.png")
+                    if let data = image.tiffRepresentation,
+                       let rep = NSBitmapImageRep(data: data),
+                       let pngData = rep.representation(using: .png, properties: [:]) {
+                        do {
+                            try pngData.write(to: imageOutputPath)
+                            
+                            
+                            
+                        } catch {
+                            log("⚠️ Failed to write image: \(error.localizedDescription)")
+                            
+                            
+                        }
+                        
+                    }
+                }
+                // Video with overlay render
+                else if graphType == "Animated Overlay" {
+                    let outputVideoURL = URL(fileURLWithPath: outputPath).appendingPathComponent("frametime_overlay.mov")
+                    if FileManager.default.fileExists(atPath: outputVideoURL.path) {
+                        try? FileManager.default.removeItem(at: outputVideoURL)
+                    }
+                    
+                    let asset = AVAsset(url: URL(fileURLWithPath: videoPath))
+                    guard let readerTrack = asset.tracks(withMediaType: .video).first else {
+                        log("❌ Could not get video track.")
+                        return outputLog
+                    }
+                    
+                    let renderSize = readerTrack.naturalSize
+                    let nominalFrameRate = readerTrack.nominalFrameRate
+                    let durationSeconds = asset.duration.seconds
+                    let totalFramesToWrite = Int(durationSeconds * Double(nominalFrameRate))
+                    let imageSize = CGSize(width: Int(renderSize.width), height: Int(renderSize.height))
+                    let windowDuration: Double = 5.0
+                    
+                    guard let writer = try? AVAssetWriter(outputURL: outputVideoURL, fileType: .mov) else {
+                        log("❌ Failed to create AVAssetWriter for output.")
+                        return outputLog
+                    }
+                    
+                    let videoSettings: [String: Any] = [
+                        AVVideoCodecKey: AVVideoCodecType.h264,
+                        AVVideoWidthKey: Int(imageSize.width),
+                        AVVideoHeightKey: Int(imageSize.height)
+                    ]
+                    
+                    let writerInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+                    let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: writerInput, sourcePixelBufferAttributes: [
+                        kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
+                        kCVPixelBufferWidthKey as String: Int(imageSize.width),
+                        kCVPixelBufferHeightKey as String: Int(imageSize.height)
+                    ])
+                    writer.add(writerInput)
+                    
+                    let overlayAsset = AVAsset(url: URL(fileURLWithPath: videoPath))
+                    guard let overlayTrack = overlayAsset.tracks(withMediaType: .video).first else {
+                        log("❌ Could not get overlay video track.")
+                        return outputLog
+                    }
+                    
+                    let overlayReader = try! AVAssetReader(asset: overlayAsset)
+                    let overlayOutput = AVAssetReaderTrackOutput(track: overlayTrack, outputSettings: [
+                        kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA)
+                    ])
+                    overlayReader.add(overlayOutput)
+                    overlayReader.startReading()
+                    
+                    let frameDeltaValues: [(Double, Double)] = frameTimes
+                        .filter { $0.2 && $0.3 > 0 }
+                        .map { ($0.1, $0.3) }
+                    
+                    let metalDevice = MTLCreateSystemDefaultDevice()!
+                    let ciContext = CIContext(mtlDevice: metalDevice)
+                    
+                    writer.startWriting()
+                    writer.startSession(atSourceTime: .zero)
+                    
+                    var frameCount = 0
+                    let queue = DispatchQueue(label: "overlay.queue")
+                    
+                    writerInput.requestMediaDataWhenReady(on: queue) {
+                        while writerInput.isReadyForMoreMediaData && frameCount < totalFramesToWrite {
+                            autoreleasepool {
+                                let currentTime = Double(frameCount) / Double(nominalFrameRate)
+                                let windowStart = max(0, currentTime - windowDuration)
+                                let windowEnd = currentTime
+                                
+                                let visiblePoints = frameDeltaValues.filter { $0.0 >= windowStart && $0.0 <= windowEnd }
+                                if visiblePoints.isEmpty {
+                                    frameCount += 1
+                                    return
+                                }
+                                
+                                guard overlayReader.status == .reading,
+                                      let sampleBuffer = overlayOutput.copyNextSampleBuffer(),
+                                      let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+                                    if overlayReader.status == .completed {
+                                        writerInput.markAsFinished()
+                                        writer.finishWriting {
+                                            onComplete(outputLog)
+                                        }
+                                        return
+                                    }
+                                    
+                                    if overlayReader.status == .completed || overlayReader.status == .reading {
+                                        writerInput.markAsFinished()
+                                        writer.finishWriting {
+                                            onComplete(outputLog)
+                                        }
+                                    } else {
+                                        log("❌ OverlayReader error: \(overlayReader.error?.localizedDescription ?? "Unknown error")")
                                         onComplete(outputLog)
                                     }
-                                } else {
-                                    log("❌ OverlayReader error: \(overlayReader.error?.localizedDescription ?? "Unknown error")")
-                                    onComplete(outputLog)
+                                    return
                                 }
-                                return
-                            }
-
-                            var pixelBuffer: CVPixelBuffer?
-                            CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &pixelBuffer)
-
-                            guard let buffer = pixelBuffer else {
-                                frameCount += 1
-                                return
-                            }
-
-                            CVPixelBufferLockBaseAddress(buffer, [])
-                            let baseAddress = CVPixelBufferGetBaseAddress(buffer)
-                            let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
-                            let colorSpace = CGColorSpaceCreateDeviceRGB()
-
-                            guard let ctx = CGContext(
-                                data: baseAddress,
-                                width: Int(imageSize.width),
-                                height: Int(imageSize.height),
-                                bitsPerComponent: 8,
-                                bytesPerRow: bytesPerRow,
-                                space: colorSpace,
-                                bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
-
-                            ) else {
-                                CVPixelBufferUnlockBaseAddress(buffer, [])
-                                frameCount += 1
-                                return
-                            }
-
-                            let baseCI = CIImage(cvPixelBuffer: imageBuffer)
-                            if let cgImage = ciContext.createCGImage(baseCI, from: baseCI.extent) {
-                                ctx.draw(cgImage, in: CGRect(origin: .zero, size: imageSize))
-                            }
-
-                                    // --- Layout ---
-                                    let graphPadding: CGFloat = 60
-                                    let graphWidth = imageSize.width - 2 * graphPadding
-                                    let graphHeight = (imageSize.height / 6) * 0.65
-                                    let offsetX = graphPadding
-                                    let offsetY: CGFloat = 80  // spacing from bottom
-
-                                    let ftGraphY = offsetY + graphHeight + 80
-                                    let fpsGraphY = offsetY
-
-                                    let xScale = graphWidth / CGFloat(windowDuration)
-
-                                    // === Frametime Graph ===
-                                    let currentVisiblePoints = frameDeltaValues.filter {
-                                        $0.0 >= currentTime - windowDuration && $0.0 <= currentTime
+                                
+                                var pixelBuffer: CVPixelBuffer?
+                                CVPixelBufferPoolCreatePixelBuffer(nil, adaptor.pixelBufferPool!, &pixelBuffer)
+                                
+                                guard let buffer = pixelBuffer else {
+                                    frameCount += 1
+                                    return
+                                }
+                                
+                                CVPixelBufferLockBaseAddress(buffer, [])
+                                let baseAddress = CVPixelBufferGetBaseAddress(buffer)
+                                let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
+                                let colorSpace = CGColorSpaceCreateDeviceRGB()
+                                
+                                guard let ctx = CGContext(
+                                    data: baseAddress,
+                                    width: Int(imageSize.width),
+                                    height: Int(imageSize.height),
+                                    bitsPerComponent: 8,
+                                    bytesPerRow: bytesPerRow,
+                                    space: colorSpace,
+                                    bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
+                                    
+                                ) else {
+                                    CVPixelBufferUnlockBaseAddress(buffer, [])
+                                    frameCount += 1
+                                    return
+                                }
+                                
+                                let baseCI = CIImage(cvPixelBuffer: imageBuffer)
+                                if let cgImage = ciContext.createCGImage(baseCI, from: baseCI.extent) {
+                                    ctx.draw(cgImage, in: CGRect(origin: .zero, size: imageSize))
+                                }
+                                
+                                // --- Layout ---
+                                let graphPadding: CGFloat = 60
+                                let graphWidth = imageSize.width - 2 * graphPadding
+                                let graphHeight = (imageSize.height / 6) * 0.65
+                                let offsetX = graphPadding
+                                let offsetY: CGFloat = 80  // spacing from bottom
+                                
+                                let ftGraphY = offsetY + graphHeight + 80
+                                let fpsGraphY = offsetY
+                                
+                                let xScale = graphWidth / CGFloat(windowDuration)
+                                
+                                // === Frametime Graph ===
+                                let currentVisiblePoints = frameDeltaValues.filter {
+                                    $0.0 >= currentTime - windowDuration && $0.0 <= currentTime
+                                }
+                                
+                                let maxDelta = currentVisiblePoints.map { $0.1 }.max() ?? 1
+                                let minDelta: Double = 0
+                                let yScaleFT = graphHeight / CGFloat(maxDelta - minDelta)
+                                
+                                ctx.setStrokeColor(NSColor.green.cgColor)
+                                ctx.setLineWidth(2.5)
+                                ctx.beginPath()
+                                
+                                for (i, (timestamp, delta)) in currentVisiblePoints.enumerated() {
+                                    let x = offsetX + CGFloat(timestamp - (currentTime - windowDuration)) * xScale
+                                    let y = ftGraphY + CGFloat(delta - minDelta) * yScaleFT
+                                    if i == 0 {
+                                        ctx.move(to: CGPoint(x: x, y: y))
+                                    } else {
+                                        ctx.addLine(to: CGPoint(x: x, y: y))
                                     }
-
-                                    let maxDelta = currentVisiblePoints.map { $0.1 }.max() ?? 1
-                                    let minDelta: Double = 0
-                                    let yScaleFT = graphHeight / CGFloat(maxDelta - minDelta)
-
-                                    ctx.setStrokeColor(NSColor.green.cgColor)
-                                    ctx.setLineWidth(2.5)
-                                    ctx.beginPath()
-
-                                    for (i, (timestamp, delta)) in currentVisiblePoints.enumerated() {
-                                        let x = offsetX + CGFloat(timestamp - (currentTime - windowDuration)) * xScale
-                                        let y = ftGraphY + CGFloat(delta - minDelta) * yScaleFT
-                                        if i == 0 {
-                                            ctx.move(to: CGPoint(x: x, y: y))
-                                        } else {
-                                            ctx.addLine(to: CGPoint(x: x, y: y))
-                                        }
+                                }
+                                ctx.strokePath()
+                                
+                                // === FPS Graph ===
+                                var fpsBuckets: [(time: Double, fps: Double)] = []
+                                let step: Double = 0.25
+                                var bucketTime: Double = 0.0
+                                
+                                while bucketTime < currentTime {
+                                    let next = bucketTime + step
+                                    let timestamps = frameDeltaValues
+                                        .filter { $0.0 >= bucketTime && $0.0 < next }
+                                        .map { $0.0 }
+                                    
+                                    let fps: Double
+                                    if timestamps.count >= 2 {
+                                        let duration = timestamps.last! - timestamps.first!
+                                        fps = Double(timestamps.count - 1) / duration
+                                    } else {
+                                        fps = Double(timestamps.count)
                                     }
-                                    ctx.strokePath()
-
-                                    // === FPS Graph ===
-                                    var fpsBuckets: [(time: Double, fps: Double)] = []
-                                    let step: Double = 0.25
-                                    var bucketTime: Double = 0.0
-
-                                    while bucketTime < currentTime {
-                                        let next = bucketTime + step
-                                        let timestamps = frameDeltaValues
-                                            .filter { $0.0 >= bucketTime && $0.0 < next }
-                                            .map { $0.0 }
-
-                                        let fps: Double
-                                        if timestamps.count >= 2 {
-                                            let duration = timestamps.last! - timestamps.first!
-                                            fps = Double(timestamps.count - 1) / duration
-                                        } else {
-                                            fps = Double(timestamps.count)
-                                        }
-
-                                        fpsBuckets.append((time: bucketTime, fps: fps))
-                                        bucketTime = next
+                                    
+                                    fpsBuckets.append((time: bucketTime, fps: fps))
+                                    bucketTime = next
+                                }
+                                
+                                
+                                let visibleFpsPoints = fpsBuckets.filter {
+                                    $0.time >= currentTime - windowDuration && $0.time <= currentTime
+                                }
+                                
+                                let minFps = visibleFpsPoints.map { $0.fps }.min() ?? 0
+                                let maxFps = visibleFpsPoints.map { $0.fps }.max() ?? 60
+                                let fpsRange = maxFps - minFps != 0 ? maxFps - minFps : 1
+                                let fpsYScale = graphHeight / CGFloat(fpsRange)
+                                
+                                ctx.setStrokeColor(NSColor.green.cgColor)
+                                ctx.setLineWidth(2.5)
+                                ctx.beginPath()
+                                
+                                for (i, point) in visibleFpsPoints.enumerated() {
+                                    let x = offsetX + CGFloat(point.time - (currentTime - windowDuration)) * xScale
+                                    let y = fpsGraphY + CGFloat(point.fps - minFps) * fpsYScale
+                                    if i == 0 {
+                                        ctx.move(to: CGPoint(x: x, y: y))
+                                    } else {
+                                        ctx.addLine(to: CGPoint(x: x, y: y))
                                     }
-
-
-                                    let visibleFpsPoints = fpsBuckets.filter {
-                                        $0.time >= currentTime - windowDuration && $0.time <= currentTime
-                                    }
-
-                                    let minFps = visibleFpsPoints.map { $0.fps }.min() ?? 0
-                                    let maxFps = visibleFpsPoints.map { $0.fps }.max() ?? 60
-                                    let fpsRange = maxFps - minFps != 0 ? maxFps - minFps : 1
-                                    let fpsYScale = graphHeight / CGFloat(fpsRange)
-
-                                    ctx.setStrokeColor(NSColor.green.cgColor)
-                                    ctx.setLineWidth(2.5)
-                                    ctx.beginPath()
-
-                                    for (i, point) in visibleFpsPoints.enumerated() {
-                                        let x = offsetX + CGFloat(point.time - (currentTime - windowDuration)) * xScale
-                                        let y = fpsGraphY + CGFloat(point.fps - minFps) * fpsYScale
-                                        if i == 0 {
-                                            ctx.move(to: CGPoint(x: x, y: y))
-                                        } else {
-                                            ctx.addLine(to: CGPoint(x: x, y: y))
-                                        }
-                                    }
-                                    ctx.strokePath()
-
-                                    // === Axes ===
+                                }
+                                ctx.strokePath()
+                                
+                                // === Axes ===
+                                ctx.setStrokeColor(NSColor.white.cgColor)
+                                ctx.setLineWidth(1.0)
+                                
+                                // Y axes
+                                ctx.stroke(CGRect(x: offsetX, y: ftGraphY, width: 0, height: graphHeight))
+                                ctx.stroke(CGRect(x: offsetX, y: fpsGraphY, width: 0, height: graphHeight))
+                                
+                                // X axes
+                                ctx.stroke(CGRect(x: offsetX, y: ftGraphY, width: graphWidth, height: 0))
+                                ctx.stroke(CGRect(x: offsetX, y: fpsGraphY, width: graphWidth, height: 0))
+                                
+                                // === FPS Text Box ===
+                                let currentBucket = Double(Int(currentTime / 0.25)) * 0.25
+                                let liveFPS = Int((fpsBuckets.first(where: { abs($0.time - currentBucket) < 0.001 })?.fps ?? 0))
+                                let fpsText = "Output FPS: \(liveFPS)"
+                                
+                                // Set up font
+                                let fontSize: CGFloat = 58
+                                let fontName = "Menlo-Bold"
+                                let font = CTFontCreateWithName(fontName as CFString, fontSize, nil)
+                                
+                                let attributes: [NSAttributedString.Key: Any] = [
+                                    .font: font,
+                                    .foregroundColor: CGColor(gray: 1.0, alpha: 1.0)
+                                ]
+                                
+                                let attrString = NSAttributedString(string: fpsText, attributes: attributes)
+                                let line = CTLineCreateWithAttributedString(attrString)
+                                
+                                // Adjust position further away from top-right corner
+                                ctx.textPosition = CGPoint(x: imageSize.width - 680, y: imageSize.height - 120)
+                                CTLineDraw(line, ctx)
+                                
+                                // === Add Frametime label ===
+                                let frametimeLabel = "Frametime"
+                                let frametimeAttr = [
+                                    NSAttributedString.Key.font: CTFontCreateWithName("Menlo-Bold" as CFString, 60, nil),
+                                    NSAttributedString.Key.foregroundColor: NSColor.white
+                                ]
+                                let frametimeText = NSAttributedString(string: frametimeLabel, attributes: frametimeAttr)
+                                let frametimePos = CGPoint(x: offsetX + 20, y: ftGraphY + graphHeight + 10)
+                                ctx.textPosition = frametimePos
+                                CTLineDraw(CTLineCreateWithAttributedString(frametimeText), ctx)
+                                
+                                
+                                // === Add FPS label ===
+                                let fpsGraphLabel = "FPS"
+                                let fpsGraphAttr = [
+                                    NSAttributedString.Key.font: CTFontCreateWithName("Menlo-Bold" as CFString, 60, nil),
+                                    NSAttributedString.Key.foregroundColor: NSColor.white
+                                ]
+                                let fpsGraphText = NSAttributedString(string: fpsGraphLabel, attributes: fpsGraphAttr)
+                                let fpsGraphPos = CGPoint(x: offsetX + 20, y: fpsGraphY + graphHeight + 10)
+                                ctx.textPosition = fpsGraphPos
+                                CTLineDraw(CTLineCreateWithAttributedString(fpsGraphText), ctx)
+                                
+                                // === Frametime Y-axis scale marks ===
+                                let uniqueFTValues = Set(visiblePoints.map { round($0.1 * 10000) / 10 })
+                                
+                                let ftRange = maxDelta - minDelta
+                                let frametimeGraphHeight: CGFloat = graphHeight
+                                let frametimeYScale: CGFloat = ftRange != 0 ? frametimeGraphHeight / CGFloat(ftRange) : 1.0
+                                
+                                
+                                var lastFtLabelY: CGFloat = -CGFloat.infinity
+                                let minFtSpacing: CGFloat = 28.0
+                                
+                                for value in uniqueFTValues.sorted() {
+                                    let y = ftGraphY + CGFloat((value / 1000.0) - minDelta) * frametimeYScale
+                                    if abs(y - lastFtLabelY) < minFtSpacing { continue }
+                                    lastFtLabelY = y
+                                    
+                                    let tickStart = CGPoint(x: offsetX - 5, y: y)
+                                    let tickEnd = CGPoint(x: offsetX, y: y)
                                     ctx.setStrokeColor(NSColor.white.cgColor)
                                     ctx.setLineWidth(1.0)
-
-                                    // Y axes
-                                    ctx.stroke(CGRect(x: offsetX, y: ftGraphY, width: 0, height: graphHeight))
-                                    ctx.stroke(CGRect(x: offsetX, y: fpsGraphY, width: 0, height: graphHeight))
-
-                                    // X axes
-                                    ctx.stroke(CGRect(x: offsetX, y: ftGraphY, width: graphWidth, height: 0))
-                                    ctx.stroke(CGRect(x: offsetX, y: fpsGraphY, width: graphWidth, height: 0))
+                                    ctx.beginPath()
+                                    ctx.move(to: tickStart)
+                                    ctx.addLine(to: tickEnd)
+                                    ctx.strokePath()
                                     
-                                    // === FPS Text Box ===
-                                    let currentBucket = Double(Int(currentTime / 0.25)) * 0.25
-                                    let liveFPS = Int((fpsBuckets.first(where: { abs($0.time - currentBucket) < 0.001 })?.fps ?? 0))
-                                    let fpsText = "Output FPS: \(liveFPS)"
-
-                                    // Set up font
-                                    let fontSize: CGFloat = 58
-                                    let fontName = "Menlo-Bold"
-                                    let font = CTFontCreateWithName(fontName as CFString, fontSize, nil)
-
+                                    let label = String(format: "%.1f", value)
                                     let attributes: [NSAttributedString.Key: Any] = [
-                                        .font: font,
-                                        .foregroundColor: CGColor(gray: 1.0, alpha: 1.0)
+                                        .font: CTFontCreateWithName("Menlo" as CFString, 22, nil),
+                                        .foregroundColor: NSColor.white
                                     ]
-
-                                    let attrString = NSAttributedString(string: fpsText, attributes: attributes)
-                                    let line = CTLineCreateWithAttributedString(attrString)
-
-                                    // Adjust position further away from top-right corner
-                                    ctx.textPosition = CGPoint(x: imageSize.width - 680, y: imageSize.height - 120)
-                                    CTLineDraw(line, ctx)
-                                    
-                                    // === Add Frametime label ===
-                                    let frametimeLabel = "Frametime"
-                                    let frametimeAttr = [
-                                        NSAttributedString.Key.font: CTFontCreateWithName("Menlo-Bold" as CFString, 60, nil),
-                                        NSAttributedString.Key.foregroundColor: NSColor.white
-                                    ]
-                                    let frametimeText = NSAttributedString(string: frametimeLabel, attributes: frametimeAttr)
-                                    let frametimePos = CGPoint(x: offsetX + 20, y: ftGraphY + graphHeight + 10)
-                                    ctx.textPosition = frametimePos
-                                    CTLineDraw(CTLineCreateWithAttributedString(frametimeText), ctx)
-
-
-                                    // === Add FPS label ===
-                                    let fpsGraphLabel = "FPS"
-                                    let fpsGraphAttr = [
-                                        NSAttributedString.Key.font: CTFontCreateWithName("Menlo-Bold" as CFString, 60, nil),
-                                        NSAttributedString.Key.foregroundColor: NSColor.white
-                                    ]
-                                    let fpsGraphText = NSAttributedString(string: fpsGraphLabel, attributes: fpsGraphAttr)
-                                    let fpsGraphPos = CGPoint(x: offsetX + 20, y: fpsGraphY + graphHeight + 10)
-                                    ctx.textPosition = fpsGraphPos
-                                    CTLineDraw(CTLineCreateWithAttributedString(fpsGraphText), ctx)
-                                    
-                                    // === Frametime Y-axis scale marks ===
-                                    let uniqueFTValues = Set(visiblePoints.map { round($0.1 * 10000) / 10 })
-
-                                    let ftRange = maxDelta - minDelta
-                                    let frametimeGraphHeight: CGFloat = graphHeight
-                                    let frametimeYScale: CGFloat = ftRange != 0 ? frametimeGraphHeight / CGFloat(ftRange) : 1.0
-
-
-                                    var lastFtLabelY: CGFloat = -CGFloat.infinity
-                                    let minFtSpacing: CGFloat = 28.0
-
-                                    for value in uniqueFTValues.sorted() {
-                                        let y = ftGraphY + CGFloat((value / 1000.0) - minDelta) * frametimeYScale
-                                        if abs(y - lastFtLabelY) < minFtSpacing { continue }
-                                        lastFtLabelY = y
-
-                                        let tickStart = CGPoint(x: offsetX - 5, y: y)
-                                        let tickEnd = CGPoint(x: offsetX, y: y)
-                                        ctx.setStrokeColor(NSColor.white.cgColor)
-                                        ctx.setLineWidth(1.0)
-                                        ctx.beginPath()
-                                        ctx.move(to: tickStart)
-                                        ctx.addLine(to: tickEnd)
-                                        ctx.strokePath()
-
-                                        let label = String(format: "%.1f", value)
-                                        let attributes: [NSAttributedString.Key: Any] = [
-                                            .font: CTFontCreateWithName("Menlo" as CFString, 22, nil),
-                                            .foregroundColor: NSColor.white
-                                        ]
-                                        let attrText = NSAttributedString(string: label, attributes: attributes)
-                                        ctx.textPosition = CGPoint(x: offsetX - 40, y: y - 8)
-                                        CTLineDraw(CTLineCreateWithAttributedString(attrText), ctx)
-                                    }
-
-
-
-
-
-                                    // === FPS Y-axis scale marks ===
-                                    let uniqueFPSValues = Set(visibleFpsPoints.map { round($0.fps) })
-
-                                    var lastFpsLabelY: CGFloat = -CGFloat.infinity
-                                    let minFpsSpacing: CGFloat = 28.0
-
-                                    for value in uniqueFPSValues.sorted() {
-                                        let y = fpsGraphY + (CGFloat(value - minFps) * fpsYScale)
-                                        if abs(y - lastFpsLabelY) < minFpsSpacing { continue }
-                                        lastFpsLabelY = y
-
-                                        let tickStart = CGPoint(x: offsetX - 5, y: y)
-                                        let tickEnd = CGPoint(x: offsetX, y: y)
-
-                                        ctx.setStrokeColor(NSColor.white.cgColor)
-                                        ctx.setLineWidth(1.0)
-                                        ctx.beginPath()
-                                        ctx.move(to: tickStart)
-                                        ctx.addLine(to: tickEnd)
-                                        ctx.strokePath()
-
-                                        let label = String(format: "%.0f", value)
-                                        let attributes: [NSAttributedString.Key: Any] = [
-                                            .font: CTFontCreateWithName("Menlo" as CFString, 25, nil),
-                                            .foregroundColor: NSColor.white
-                                        ]
-                                        let attrText = NSAttributedString(string: label, attributes: attributes)
-                                        ctx.textPosition = CGPoint(x: offsetX - 40, y: y - 8)
-                                        CTLineDraw(CTLineCreateWithAttributedString(attrText), ctx)
-                                    }
-
-                            CVPixelBufferUnlockBaseAddress(buffer, [])
-
-                            let presentationTime = CMTime(value: CMTimeValue(frameCount), timescale: CMTimeScale(nominalFrameRate))
-                            adaptor.append(buffer, withPresentationTime: presentationTime)
-                            frameCount += 1
-                        }
-                    }
-
-                    if frameCount >= totalFramesToWrite {
-                        writerInput.markAsFinished()
-                        writer.finishWriting {
-                            onComplete(outputLog)
-                        }
-                    }
-                
-            
-
-
-
-
-
-
-                                    
+                                    let attrText = NSAttributedString(string: label, attributes: attributes)
+                                    ctx.textPosition = CGPoint(x: offsetX - 40, y: y - 8)
+                                    CTLineDraw(CTLineCreateWithAttributedString(attrText), ctx)
+                                }
                                 
-
-
-
-
+                                
+                                
+                                
+                                
+                                // === FPS Y-axis scale marks ===
+                                let uniqueFPSValues = Set(visibleFpsPoints.map { round($0.fps) })
+                                
+                                var lastFpsLabelY: CGFloat = -CGFloat.infinity
+                                let minFpsSpacing: CGFloat = 28.0
+                                
+                                for value in uniqueFPSValues.sorted() {
+                                    let y = fpsGraphY + (CGFloat(value - minFps) * fpsYScale)
+                                    if abs(y - lastFpsLabelY) < minFpsSpacing { continue }
+                                    lastFpsLabelY = y
+                                    
+                                    let tickStart = CGPoint(x: offsetX - 5, y: y)
+                                    let tickEnd = CGPoint(x: offsetX, y: y)
+                                    
+                                    ctx.setStrokeColor(NSColor.white.cgColor)
+                                    ctx.setLineWidth(1.0)
+                                    ctx.beginPath()
+                                    ctx.move(to: tickStart)
+                                    ctx.addLine(to: tickEnd)
+                                    ctx.strokePath()
+                                    
+                                    let label = String(format: "%.0f", value)
+                                    let attributes: [NSAttributedString.Key: Any] = [
+                                        .font: CTFontCreateWithName("Menlo" as CFString, 25, nil),
+                                        .foregroundColor: NSColor.white
+                                    ]
+                                    let attrText = NSAttributedString(string: label, attributes: attributes)
+                                    ctx.textPosition = CGPoint(x: offsetX - 40, y: y - 8)
+                                    CTLineDraw(CTLineCreateWithAttributedString(attrText), ctx)
+                                }
+                                
+                                CVPixelBufferUnlockBaseAddress(buffer, [])
+                                
+                                let presentationTime = CMTime(value: CMTimeValue(frameCount), timescale: CMTimeScale(nominalFrameRate))
+                                adaptor.append(buffer, withPresentationTime: presentationTime)
+                                frameCount += 1
+                            }
+                        }
                         
-
-                    
+                        if frameCount >= totalFramesToWrite {
+                            writerInput.markAsFinished()
+                            writer.finishWriting {
+                                onComplete(outputLog)
+                            }
+                        }
+                        
+                    }
                 }
             }
 
@@ -1092,7 +1077,7 @@ public struct FrameAnalyzer {
                     return outputLog
                 }
             
-        }
+        
         
         func pixelBufferFromCGImage(cgImage: CGImage, size: CGSize) -> CVPixelBuffer? {
             var pixelBuffer: CVPixelBuffer?
