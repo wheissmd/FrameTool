@@ -2,6 +2,19 @@
 
 **FrameTool** is a macOS application for analyzing whether a video contains dropped (duplicated) frames. It’s primarily intended for evaluating game performance via recorded output but can be applied to other scenarios as well (i. e. Dropped frames in recordings from camera).
 
+<table>
+  <tr>
+    <td>
+      <img width="400" alt="Screenshot 1" src="https://github.com/user-attachments/assets/bdb35542-93e7-44b7-8a74-ca0fc5045828" />
+    </td>
+    <td>
+      <img width="400" alt="Screenshot 2" src="https://github.com/user-attachments/assets/0cd110b8-1ae2-4056-b8e7-4f187264dd3e" />
+    </td>
+  </tr>
+</table>
+
+
+
 ---
 
 ## App Purpose
@@ -26,7 +39,7 @@ Installation of the app:
 Using FrameTool is simple:
 1. Launch the app
 2. Set up the output location (defaults to user/Documents)
-3. Set up additional exports you would like (CSV statistics or Graph Output)
+3. Set up additional exports you would like (CSV statistics or Graph Output) in the settings menu
 4. Drop a video file to a drag and drop section
 5. Press "Run Analysis"
 6. Wait for the analysis to complete
@@ -38,15 +51,17 @@ A test sample video is provided within the `.dmg` installer to demonstrate how t
 
 > ⚠️ **Important:** The analyzed video must be free of screen tearing. Any tearing will cause the app to falsely detect new frames. Poor bitrate of the video might also result in falsely detecting new frames, it is not recommended to process the videos recorded on Intel Arc by its own codec (AMD and Nvidia is fine as long as its reasonable bitrate). Additionally, the app does **not** report FPS values higher than the framerate the video was recorded at.
 
+> ⚠️ **Note:** Tearing Detection algorithm is available in v0.2.0, however, it is experimental and known to produce both false negative and positive results. You can use this mode for entertainment, but it is in the early development stage. To acdcess this mode hold ⌥ (Option Button) in the settings menu.
+
 ---
 
 ## System Requirements
 
-- Tested on **Apple Silicon Macs only**, however the v0.1.0 **may** run on **Intel-based Macs**
+- Tested on **Apple Silicon Macs only**, however the v0.1.0 and newer **may** run on **Intel-based Macs**
 - **8GB RAM recommended** for Single threading processing
 - **16GB RAM recommended** for Multithreading accelleration for 4K videos under 1 minute long
 - **24GB RAM recommended** for Multithreading accelleration for 4K videos over 1 minute long
-- macOS Sequoia 15.1 or newer for v0.1.0 (on earlier macOS versions you can still run a basic version v0.0.1)
+- macOS Sequoia 15.1 or newer for v0.1.0 and newer (on earlier macOS versions you can still run a basic version v0.0.1)
 
 ---
 
@@ -57,6 +72,7 @@ A test sample video is provided within the `.dmg` installer to demonstrate how t
 - Detailed statistics csv output
 - Graphical visualization of frame time and fps, that can either be rendered as image, interactive HTML graph or Animated overlay on top of the provided video source
 - Processing time tracker
+- Two custom design themes with vocaloids (Hatsune Miku and Megurine Luka)
   
 ---
 
@@ -103,3 +119,5 @@ See `LICENSE.md` for full details.
   - `AppKit`
   - `CoreText`
 - Developed and tested in **xCode** on macOS
+- Uses arts from piapro by nibeさん and なっつみかんさん
+- Uses music from piapro by 厚寝巻 and Tsubaki_Kun
