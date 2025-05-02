@@ -1,5 +1,16 @@
 # Changelog
 
+## Alpha [0.2.0] - 2025-05-02
+### Added
+- Early Prototype of a screen tearing detection system
+- Animated Overlay GPU render (Significantly increases performance)
+- Proper settings menu, config support
+- Themes with vocaloids
+### Improved
+- UI was reworked to support different themes, logically organize options, include settings descriptions
+- Fixed multiple bugs
+- Improved min and max FPS statistics to work with FPS quarter second bucket rather than rely on longest or shortest frame
+
 ## Alpha [0.1.0] - 2025-04-21
 ### Added
 - Moved back end to swift, dramatic increase of performance and RAM utilization efficiency
