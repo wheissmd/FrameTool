@@ -61,7 +61,7 @@ A test sample video is provided within the `.dmg` installer to demonstrate how t
 - **8GB RAM recommended** for Single threading processing
 - **16GB RAM recommended** for Multithreading accelleration for 4K videos under 1 minute long
 - **24GB RAM recommended** for Multithreading accelleration for 4K videos over 1 minute long
-- macOS Sequoia 15.1 or newer for v0.1.0 and newer (on earlier macOS versions you can still run a basic version v0.0.1)
+- macOS Sequoia 15.1 or newer for v0.1.0 and newer
 
 ---
 
