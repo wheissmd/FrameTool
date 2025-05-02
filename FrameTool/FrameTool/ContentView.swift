@@ -3,7 +3,7 @@
 //
 //  Created by wheissmd on 17/04/2025.
 
-
+import AVFoundation
 import SwiftUI
 import AppKit
 
@@ -120,7 +120,19 @@ extension Color {
             return colorScheme == .dark ? .white : .black // System default unselected
         }
     }
-}
+    
+    static func tooltipBackground(customThemeEnabled: Bool, themeType: String) -> Color {
+            if customThemeEnabled && themeType == "Hatsune Miku" {
+                return Color(red: 110/255, green: 170/255, blue: 200/255)
+            } else if customThemeEnabled && themeType == "Megurine Luka" {
+                return Color(red: 191/255, green: 116/255, blue: 141/255)
+            } else {
+                return Color(NSColor.textBackgroundColor) // Default system tooltip color
+            }
+        }
+    }
+
+
 
 
 
@@ -205,6 +217,8 @@ struct AppConfig: Codable {
 
 struct ContentView: View {
     
+    @State private var audioPlayer: AVAudioPlayer?
+    @State private var isPlayingMusic = false
     @State private var isAnalyzing = false
     @State private var isRunning = false
     @State private var progressStage: String = ""
@@ -242,6 +256,18 @@ struct ContentView: View {
         }
     }
     
+    var musicAttribution: String {
+        if isPlayingMusic && customThemeEnabled {
+            if themeType == "Hatsune Miku" {
+                return #"Music: "MICHRONICLE" by Thick nightgown (piapro)"#
+            } else if themeType == "Megurine Luka" {
+                return #"Music: "Ghost Rule" by Tsubaki Kun (piapro)"#
+            }
+        }
+        return ""
+    }
+
+    
     var primaryTextColor: Color {
         if customThemeEnabled && (themeType == "Hatsune Miku" || themeType == "Megurine Luka") {
             return .black
@@ -258,6 +284,36 @@ struct ContentView: View {
         }
     }
 
+    func toggleMusic() {
+        if isPlayingMusic {
+            audioPlayer?.stop()
+            isPlayingMusic = false
+        } else {
+            var musicFileName: String?
+
+            if customThemeEnabled && themeType == "Hatsune Miku" {
+                musicFileName = "Thick_nightgown_Miku-MICHRONICLE"
+            } else if customThemeEnabled && themeType == "Megurine Luka" {
+                musicFileName = "Tsubaki_Kun-Luka-Ghost_Rule"
+            }
+
+            if let fileName = musicFileName, let path = Bundle.main.path(forResource: fileName, ofType: "mp3") {
+                let url = URL(fileURLWithPath: path)
+                do {
+                    audioPlayer = try AVAudioPlayer(contentsOf: url)
+                    audioPlayer?.play()
+                    isPlayingMusic = true
+                } catch {
+                    print("Failed to play music: \(error.localizedDescription)")
+                }
+            } else {
+                print("Music file not found")
+            }
+        }
+    }
+
+
+    
     var body: some View {
         
         ZStack(alignment: .topLeading) {
@@ -370,6 +426,13 @@ struct ContentView: View {
             .padding()
             .onAppear(perform: loadConfig)
             .onReceive(timer) { _ in if isAnalyzing { processingDuration += 1 } }
+            .onChange(of: themeType) { newTheme in
+                if isPlayingMusic {
+                    audioPlayer?.stop()
+                    isPlayingMusic = false
+                }
+            }
+
             
             if isAnalyzing {
                 VStack(spacing: 8) {
@@ -384,6 +447,16 @@ struct ContentView: View {
             }
 
 
+            if !musicAttribution.isEmpty {
+                Text(musicAttribution)
+                    .font(.caption)
+                    .foregroundColor(customThemeEnabled && (themeType == "Hatsune Miku" || themeType == "Megurine Luka") ? .black : .gray)
+                    .padding(.leading, 16)
+                    .padding(.bottom, 32)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+            }
+
+            
             Text(themeArtAttribution)
                 .font(.caption)
                 .foregroundColor(customThemeEnabled && (themeType == "Hatsune Miku" || themeType == "Megurine Luka") ? .black : .gray)
@@ -399,6 +472,34 @@ struct ContentView: View {
                     .padding(.bottom, 16)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
             }
+            
+            if customThemeEnabled && themeType == "Hatsune Miku" {
+                Button(action: {
+                    toggleMusic()
+                }) {
+                    Rectangle()
+                        .fill(Color.clear) // invisible, but still clickable
+                        .frame(width: 250, height: 450)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PlainButtonStyle())
+                .position(x: 580, y: 590)
+            }
+            
+            if customThemeEnabled && themeType == "Megurine Luka" {
+                Button(action: {
+                    toggleMusic()
+                }) {
+                    Rectangle()
+                        .fill(Color.clear) // invisible, but still clickable
+                        .frame(width: 250, height: 450)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PlainButtonStyle())
+                .position(x: 199, y: 590)
+            }
+
+
 
 
             if showSettings {
@@ -609,7 +710,12 @@ struct SettingsPopup: View {
                 if multithreadingEnabled {
                     Text("⚠️ WARNING: Multithreading requires at least 16GB of RAM, otherwise it slows down the processing.")
                         .font(.caption)
-                        .foregroundColor(.orange)
+                        .foregroundColor(
+                            customThemeEnabled && themeType == "Hatsune Miku"
+                            ? Color(red: 1.0, green: 0.9, blue: 0.4) // Yellow, more readable
+                            : .orange
+                        )
+
                 }
                 
                 if tearingDetection || isOptionKeyPressed {
@@ -989,7 +1095,10 @@ struct SettingsPopup: View {
                         .font(.caption)
                         .padding(8)
                         .frame(maxWidth: 260, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.windowBackgroundColor)))
+                        .background(
+                            Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                        )
+                        .cornerRadius(8)
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
                         .shadow(radius: 4)
                         .transition(.opacity)
@@ -1001,7 +1110,10 @@ struct SettingsPopup: View {
                         .font(.caption)
                         .padding(8)
                         .frame(maxWidth: 260, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.windowBackgroundColor)))
+                        .background(
+                            Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                        )
+                        .cornerRadius(8)
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
                         .shadow(radius: 4)
                         .transition(.opacity)
@@ -1013,7 +1125,10 @@ struct SettingsPopup: View {
                         .font(.caption)
                         .padding(8)
                         .frame(maxWidth: 260, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.windowBackgroundColor)))
+                        .background(
+                            Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                        )
+                        .cornerRadius(8)
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
                         .shadow(radius: 4)
                         .transition(.opacity)
@@ -1025,7 +1140,10 @@ struct SettingsPopup: View {
                         .font(.caption)
                         .padding(8)
                         .frame(maxWidth: 260, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.windowBackgroundColor)))
+                        .background(
+                            Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                        )
+                        .cornerRadius(8)
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
                         .shadow(radius: 4)
                         .transition(.opacity)
@@ -1037,7 +1155,10 @@ struct SettingsPopup: View {
                         .font(.caption)
                         .padding(8)
                         .frame(maxWidth: 260, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.windowBackgroundColor)))
+                        .background(
+                            Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                        )
+                        .cornerRadius(8)
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
                         .shadow(radius: 4)
                         .transition(.opacity)
@@ -1049,7 +1170,10 @@ struct SettingsPopup: View {
                         .font(.caption)
                         .padding(8)
                         .frame(maxWidth: 260, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.windowBackgroundColor)))
+                        .background(
+                            Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                        )
+                        .cornerRadius(8)
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
                         .shadow(radius: 4)
                         .transition(.opacity)
@@ -1061,7 +1185,10 @@ struct SettingsPopup: View {
                         .font(.caption)
                         .padding(8)
                         .frame(maxWidth: 260, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.windowBackgroundColor)))
+                        .background(
+                            Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                        )
+                        .cornerRadius(8)
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
                         .shadow(radius: 4)
                         .transition(.opacity)
@@ -1083,7 +1210,10 @@ struct SettingsPopup: View {
                         }
                         .padding(8)
                         .frame(maxWidth: 400, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.windowBackgroundColor)))
+                        .background(
+                            Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                        )
+                        .cornerRadius(8)
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
                         .shadow(radius: 4)
                         .transition(.opacity)
@@ -1104,7 +1234,10 @@ struct SettingsPopup: View {
                     }
                     .padding(8)
                     .frame(maxWidth: 400, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(.windowBackgroundColor)))
+                    .background(
+                        Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                    )
+                    .cornerRadius(8)
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
                     .shadow(radius: 4)
                     .transition(.opacity)
@@ -1125,7 +1258,10 @@ struct SettingsPopup: View {
                     }
                     .padding(8)
                     .frame(maxWidth: 400, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(.windowBackgroundColor)))
+                    .background(
+                        Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                    )
+                    .cornerRadius(8)
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
                     .shadow(radius: 4)
                     .transition(.opacity)
@@ -1137,7 +1273,10 @@ struct SettingsPopup: View {
                         .font(.caption)
                         .padding(8)
                         .frame(maxWidth: 260, alignment: .leading)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(Color(.windowBackgroundColor)))
+                        .background(
+                            Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                        )
+                        .cornerRadius(8)
                         .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
                         .shadow(radius: 4)
                         .transition(.opacity)
@@ -1157,7 +1296,10 @@ struct SettingsPopup: View {
                     }
                     .padding(8)
                     .frame(maxWidth: 320, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(.windowBackgroundColor)))
+                    .background(
+                        Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                    )
+                    .cornerRadius(8)
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
                     .shadow(radius: 4)
                     .transition(.opacity)
@@ -1177,7 +1319,10 @@ struct SettingsPopup: View {
                     }
                     .padding(8)
                     .frame(maxWidth: 320, alignment: .leading)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color(.windowBackgroundColor)))
+                    .background(
+                        Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                    )
+                    .cornerRadius(8)
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
                     .shadow(radius: 4)
                     .transition(.opacity)
