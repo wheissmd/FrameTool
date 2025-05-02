@@ -2,6 +2,19 @@
 
 **FrameTool** is a macOS application for analyzing whether a video contains dropped (duplicated) frames. It’s primarily intended for evaluating game performance via recorded output but can be applied to other scenarios as well (i. e. Dropped frames in recordings from camera).
 
+<table>
+  <tr>
+    <td>
+      <img width="400" alt="Screenshot 1" src="https://github.com/user-attachments/assets/bdb35542-93e7-44b7-8a74-ca0fc5045828" />
+    </td>
+    <td>
+      <img width="400" alt="Screenshot 2" src="https://github.com/user-attachments/assets/0cd110b8-1ae2-4056-b8e7-4f187264dd3e" />
+    </td>
+  </tr>
+</table>
+
+
+
 ---
 
 ## App Purpose
