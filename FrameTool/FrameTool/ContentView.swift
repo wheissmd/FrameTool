@@ -259,9 +259,9 @@ struct ContentView: View {
     var musicAttribution: String {
         if isPlayingMusic && customThemeEnabled {
             if themeType == "Hatsune Miku" {
-                return #"Music: "MICHRONICLE" by Thick nightgown (piapro)"#
+                return #"Music: "MICHRONICLE" by 厚寝巻 (piapro)"#
             } else if themeType == "Megurine Luka" {
-                return #"Music: "Ghost Rule" by Tsubaki Kun (piapro)"#
+                return #"Music: "Ghost Rule" by Tsubaki_Kun (piapro)"#
             }
         }
         return ""
