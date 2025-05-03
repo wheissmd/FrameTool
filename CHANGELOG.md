@@ -1,5 +1,10 @@
 # Changelog
 
+## Alpha [0.2.1] - 2025-05-02
+### Improved
+- Animated Overlay reporting 0 FPS in some frames bug fixed
+- Animated Overlay now scales properly to any 16:9 resolution, text no longer huge in 720p or small in 4K
+
 ## Alpha [0.2.0] - 2025-05-02
 ### Added
 - Early Prototype of a screen tearing detection system
