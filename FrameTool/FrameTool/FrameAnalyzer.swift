@@ -683,7 +683,7 @@ public struct FrameAnalyzer {
                     let durationSeconds = asset.duration.seconds
                     let totalFramesToWrite = Int(durationSeconds * Double(nominalFrameRate))
                     let imageSize = CGSize(width: Int(renderSize.width), height: Int(renderSize.height))
-                    let scaleFactor = imageSize.height / 1080.0
+                    let scaleFactor = imageSize.height / 1260.0
                     let windowDuration: Double = 5.0
                     
                     guard let writer = try? AVAssetWriter(outputURL: outputVideoURL, fileType: .mov) else {
@@ -952,7 +952,7 @@ public struct FrameAnalyzer {
 
 
                                 var lastFtLabelY: CGFloat = -CGFloat.infinity
-                                let minFtSpacing: CGFloat = 28.0
+                                let minFtSpacing: CGFloat = 28.0 * scaleFactor
 
                                 for value in uniqueFTValues.sorted() {
                                     let y = ftGraphY + CGFloat((value / 1000.0) - minDelta) * frametimeYScale
@@ -986,7 +986,7 @@ public struct FrameAnalyzer {
                                 let uniqueFPSValues = Set(visibleFpsPoints.map { round($0.fps) })
 
                                 var lastFpsLabelY: CGFloat = -CGFloat.infinity
-                                let minFpsSpacing: CGFloat = 28.0
+                                let minFpsSpacing: CGFloat = 28.0 * scaleFactor
 
                                 for value in uniqueFPSValues.sorted() {
                                     let y = fpsGraphY + (CGFloat(value - minFps) * fpsYScale)
