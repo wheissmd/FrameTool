@@ -897,7 +897,8 @@ public struct FrameAnalyzer {
                                 
                                 // === FPS Text Box ===
                                 let currentBucket = Double(Int(currentTime / 0.25)) * 0.25
-                                let liveFPS = Int((fpsBuckets.first(where: { abs($0.time - currentBucket) < 0.001 })?.fps ?? 0))
+                                let fallbackFPS = fpsBuckets.last?.fps ?? 0
+                                let liveFPS = Int(fpsBuckets.first(where: { abs($0.time - currentBucket) < 0.001 })?.fps ?? fallbackFPS)
                                 let fpsText = "Output FPS: \(liveFPS)"
                                 
                                 // Set up font
