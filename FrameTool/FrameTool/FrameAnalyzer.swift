@@ -32,7 +32,9 @@ public struct FrameAnalyzer {
             exportGraph: Bool = false,
             graphType: String,
             detectTearing: Bool = false,
+            userGraphScale: CGFloat,
             onComplete: @escaping (String) -> Void = { _ in }
+            
         ) -> String {
             var outputLog = ""
             func log(_ msg: String) {
@@ -683,7 +685,10 @@ public struct FrameAnalyzer {
                     let durationSeconds = asset.duration.seconds
                     let totalFramesToWrite = Int(durationSeconds * Double(nominalFrameRate))
                     let imageSize = CGSize(width: Int(renderSize.width), height: Int(renderSize.height))
-                    let scaleFactor = imageSize.height / 1260.0
+                    let scaleBase: CGFloat = 1260.0
+                    let graphScaleValue = min(max(userGraphScale, 50), 150)
+                    let adjustedBase = scaleBase * (100.0 / graphScaleValue)
+                    let scaleFactor = imageSize.height / adjustedBase
                     let windowDuration: Double = 5.0
                     
                     guard let writer = try? AVAssetWriter(outputURL: outputVideoURL, fileType: .mov) else {

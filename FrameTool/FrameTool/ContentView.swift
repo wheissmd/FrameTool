@@ -213,6 +213,7 @@ struct AppConfig: Codable {
     var tearingDetection: Bool
     var customThemeEnabled: Bool
     var themeType: String
+    var userGraphScale: CGFloat
 }
 
 struct ContentView: View {
@@ -227,6 +228,7 @@ struct ContentView: View {
     @State private var csvExportPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.path
     @State private var droppedFilePath: String? = nil
     @State private var outputText: String = ""
+    @State private var userGraphScale: CGFloat = 100
 
     @State private var reportStatistics = false
     @State private var statisticsType = "General"
@@ -514,7 +516,8 @@ struct ContentView: View {
                     graphOptions: graphOptions,
                     tearingDetection: $tearingDetection,
                     customThemeEnabled: $customThemeEnabled,
-                    themeType: $themeType
+                    themeType: $themeType,
+                    userGraphScale: $userGraphScale
                 )
                 .frame(width: 600)
                     .padding()
@@ -585,7 +588,8 @@ struct ContentView: View {
                 statsMode: statisticsType,
                 exportGraph: exportGraph,
                 graphType: graphType,
-                detectTearing: tearingDetection
+                detectTearing: tearingDetection,
+                userGraphScale: userGraphScale
             ) { result in
                 DispatchQueue.main.async {
                     self.outputText = result
@@ -613,7 +617,8 @@ struct ContentView: View {
             graphType: graphType,
             tearingDetection: tearingDetection,
             customThemeEnabled: customThemeEnabled,
-            themeType: themeType
+            themeType: themeType,
+            userGraphScale: userGraphScale
         )
         if let data = try? JSONEncoder().encode(config) {
             let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("frametool_config.json")
@@ -634,6 +639,7 @@ struct ContentView: View {
             tearingDetection = config.tearingDetection
             customThemeEnabled = config.customThemeEnabled
             themeType = config.themeType
+            userGraphScale = config.userGraphScale
         }
         
     }
@@ -691,6 +697,10 @@ struct SettingsPopup: View {
     @State private var isHoveringThemeLuka = false
     @State private var themeMikuFrame: CGRect = .zero
     @State private var themeLukaFrame: CGRect = .zero
+    
+    @Binding var userGraphScale: CGFloat
+    @State private var isHoveringGraphScale = false
+    @State private var graphScaleLabelFrame: CGRect = .zero
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -961,6 +971,20 @@ struct SettingsPopup: View {
                     .background(Color(NSColor.controlBackgroundColor))
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3)))
+                    
+                    if exportGraph && graphType == "Animated Overlay" {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Animated Overlay Scale")
+                                .font(.system(size: 13))
+                            HStack {
+                                Slider(value: $userGraphScale, in: 50...150)
+                                
+                                Text("\(Int(userGraphScale))")
+                                    .frame(width: 35, alignment: .trailing)
+                                    .font(.system(size: 13))
+                            }
+                        }
+                    }
 
                 }
                 
@@ -1181,7 +1205,7 @@ struct SettingsPopup: View {
                         .offset(x: statisticsDetailedFrame.minX, y: statisticsDetailedFrame.minY - 108)
                 }
                 if isHoveringExportGraphToggle {
-                    Text("Export graph of the frame times and FPS throughout the analyzed video.")
+                    Text("Exports graph of the frame times and FPS throughout the analyzed video.")
                         .font(.caption)
                         .padding(8)
                         .frame(maxWidth: 260, alignment: .leading)
