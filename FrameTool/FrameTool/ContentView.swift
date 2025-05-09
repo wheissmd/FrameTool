@@ -214,6 +214,8 @@ struct AppConfig: Codable {
     var customThemeEnabled: Bool
     var themeType: String
     var userGraphScale: CGFloat
+    var renderOneSideOnly: Bool
+    var overlayPosition: String
 }
 
 struct ContentView: View {
@@ -247,6 +249,12 @@ struct ContentView: View {
     @State private var customThemeEnabled = false
     @State private var themeType = "Hatsune Miku"
     private let themeOptions = ["Hatsune Miku", "Megurine Luka", "Coming Soon"]
+    
+    @State private var renderOneSideOnly = false
+    
+    @State private var overlayPosition: String = "Left"
+
+
     
     var themeArtAttribution: String {
         if customThemeEnabled && themeType == "Hatsune Miku" {
@@ -517,7 +525,9 @@ struct ContentView: View {
                     tearingDetection: $tearingDetection,
                     customThemeEnabled: $customThemeEnabled,
                     themeType: $themeType,
-                    userGraphScale: $userGraphScale
+                    userGraphScale: $userGraphScale,
+                    renderOneSideOnly: $renderOneSideOnly,
+                    overlayPosition: $overlayPosition
                 )
                 .frame(width: 600)
                     .padding()
@@ -589,7 +599,9 @@ struct ContentView: View {
                 exportGraph: exportGraph,
                 graphType: graphType,
                 detectTearing: tearingDetection,
-                userGraphScale: userGraphScale
+                userGraphScale: userGraphScale,
+                renderOneSideOnly: renderOneSideOnly,
+                overlayPosition: overlayPosition
             ) { result in
                 DispatchQueue.main.async {
                     self.outputText = result
@@ -618,7 +630,10 @@ struct ContentView: View {
             tearingDetection: tearingDetection,
             customThemeEnabled: customThemeEnabled,
             themeType: themeType,
-            userGraphScale: userGraphScale
+            userGraphScale: userGraphScale,
+            renderOneSideOnly: renderOneSideOnly,
+            overlayPosition: overlayPosition
+
         )
         if let data = try? JSONEncoder().encode(config) {
             let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("frametool_config.json")
@@ -640,6 +655,8 @@ struct ContentView: View {
             customThemeEnabled = config.customThemeEnabled
             themeType = config.themeType
             userGraphScale = config.userGraphScale
+            renderOneSideOnly = config.renderOneSideOnly
+            overlayPosition = config.overlayPosition
         }
         
     }
@@ -699,9 +716,17 @@ struct SettingsPopup: View {
     @State private var themeLukaFrame: CGRect = .zero
     
     @Binding var userGraphScale: CGFloat
-    @State private var isHoveringGraphScale = false
-    @State private var graphScaleLabelFrame: CGRect = .zero
+    @State private var isHoveringGraphScaleSlider = false
+    @State private var graphScaleSliderFrame: CGRect = .zero
+    
+    @Binding var renderOneSideOnly: Bool
+    @State private var isHoveringRenderOneSideOnly = false
+    @State private var renderOneSideOnlyFrame: CGRect = .zero
+    
+    @Binding var overlayPosition: String
 
+    
+    
     var body: some View {
         ZStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 22) {
@@ -977,13 +1002,49 @@ struct SettingsPopup: View {
                             Text("Animated Overlay Scale")
                                 .font(.system(size: 13))
                             HStack {
-                                Slider(value: $userGraphScale, in: 50...150)
-                                
+                                GeometryReader { geo in
+                                    Slider(value: $userGraphScale, in: 50...150)
+                                        .onHover { hovering in
+                                            isHoveringGraphScaleSlider = hovering
+                                            if hovering {
+                                                graphScaleSliderFrame = geo.frame(in: .global)
+                                            }
+                                        }
+                                }
+                                .frame(height: 20) // needed for GeometryReader to show properly
+
                                 Text("\(Int(userGraphScale))")
                                     .frame(width: 35, alignment: .trailing)
                                     .font(.system(size: 13))
                             }
                         }
+                        GeometryReader { geo in
+                            HStack(spacing: 8) {
+                                Toggle(isOn: $renderOneSideOnly) {
+                                    Text("Render overlay on half of the frame")
+                                        .font(.system(size: 13))
+                                }
+                                .onHover { hovering in
+                                    isHoveringRenderOneSideOnly = hovering
+                                    if hovering {
+                                        renderOneSideOnlyFrame = geo.frame(in: .global)
+                                    }
+                                }
+
+                                Picker("", selection: $overlayPosition) {
+                                    Text("Left").tag("Left")
+                                    Text("Middle").tag("Middle")
+                                    Text("Right").tag("Right")
+                                }
+                                .frame(width: 90)
+                                .pickerStyle(MenuPickerStyle())
+                                .disabled(!renderOneSideOnly) // disable if toggle is off
+                            }
+                        }
+                        .frame(height: 24)
+
+
+
                     }
 
                 }
@@ -1353,6 +1414,48 @@ struct SettingsPopup: View {
                     .zIndex(10)
                     .offset(x: themeLukaFrame.minX - 60, y: themeLukaFrame.minY - 100)
                 }
+                if isHoveringGraphScaleSlider {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Controls the size of the Animated Overlay")
+                            .font(.caption)
+
+                        GIFImage(gifName: "Scaling")
+                            .resizable()
+                            .frame(height: 220)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                    }
+                    .padding(8)
+                    .frame(maxWidth: 400, alignment: .leading)
+                    .background(
+                        Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                    )
+                    .cornerRadius(8)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
+                    .shadow(radius: 4)
+                    .transition(.opacity)
+                    .zIndex(10)
+                    .offset(x: graphScaleSliderFrame.minX - 65, y: graphScaleSliderFrame.minY - 93)
+                }
+                if isHoveringRenderOneSideOnly {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Renders an overlay on only one side of a frame. Useful for locating the videos with overlays side by side.")
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(8)
+                    .frame(maxWidth: 400, alignment: .leading)
+                    .background(
+                        Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                    )
+                    .cornerRadius(8)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
+                    .shadow(radius: 4)
+                    .transition(.opacity)
+                    .zIndex(10)
+                    .offset(x: renderOneSideOnlyFrame.minX - 35, y: renderOneSideOnlyFrame.minY - 113)
+                }
+
+
 
 
                 

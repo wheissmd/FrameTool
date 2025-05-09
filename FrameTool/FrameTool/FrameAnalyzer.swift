@@ -33,6 +33,8 @@ public struct FrameAnalyzer {
             graphType: String,
             detectTearing: Bool = false,
             userGraphScale: CGFloat,
+            renderOneSideOnly: Bool,
+            overlayPosition: String,
             onComplete: @escaping (String) -> Void = { _ in }
             
         ) -> String {
@@ -806,10 +808,32 @@ public struct FrameAnalyzer {
                                 }
                                 
                                 // --- Layout ---
+                                let fullGraphWidth = imageSize.width
+                                let halfGraphWidth = imageSize.width / 2
+
+                                // Determine visible overlay region based on setting
+                                let (graphAreaX, graphAreaWidth): (CGFloat, CGFloat) = {
+                                    if renderOneSideOnly {
+                                        switch overlayPosition {
+                                        case "Left":
+                                            return (0, halfGraphWidth)
+                                        case "Middle":
+                                            return (fullGraphWidth / 4, halfGraphWidth)
+                                        case "Right":
+                                            return (fullGraphWidth / 2, halfGraphWidth)
+                                        default:
+                                            return (0, halfGraphWidth)
+                                        }
+                                    } else {
+                                        return (0, fullGraphWidth)
+                                    }
+                                }()
+
+
                                 let graphPadding: CGFloat = 60 * scaleFactor
-                                let graphWidth = imageSize.width - 2 * graphPadding
+                                let graphWidth = graphAreaWidth - 2 * graphPadding
                                 let graphHeight = (imageSize.height / 6) * 0.65
-                                let offsetX = graphPadding
+                                let offsetX = graphAreaX + graphPadding  // shift graph drawing into the restricted region
                                 let offsetY: CGFloat = 80 * scaleFactor  // spacing from bottom
 
                                 let ftGraphY = offsetY + graphHeight + 80 * scaleFactor
@@ -920,16 +944,40 @@ public struct FrameAnalyzer {
                                 let attrString = NSAttributedString(string: fpsText, attributes: attributes)
                                 let line = CTLineCreateWithAttributedString(attrString)
 
-                                // Adjust position further away from top-right corner
-                                ctx.textPosition = CGPoint(x: imageSize.width - 680 * scaleFactor, y: imageSize.height - 120 * scaleFactor)
+                                // Adjust position
+                                let fpsTextPosX: CGFloat = {
+                                    if renderOneSideOnly {
+                                        switch overlayPosition {
+                                        case "Left":
+                                            return 60 * scaleFactor
+                                        case "Middle":
+                                            return imageSize.width / 2 - 240 * scaleFactor
+                                        case "Right":
+                                            return imageSize.width - 680 * scaleFactor
+                                        default:
+                                            return imageSize.width - 680 * scaleFactor
+                                        }
+                                    } else {
+                                        return imageSize.width - 680 * scaleFactor
+                                    }
+                                }()
 
-                                CTLineDraw(line, ctx)
+                                let attr = NSAttributedString(string: fpsText, attributes: [
+                                    .font: font,
+                                    .strokeColor: NSColor.black,
+                                    .foregroundColor: NSColor.white,
+                                    .strokeWidth: -2.0
+                                ])
+                                ctx.textPosition = CGPoint(x: fpsTextPosX, y: imageSize.height - 120 * scaleFactor)
+                                CTLineDraw(CTLineCreateWithAttributedString(attr), ctx)
 
                                 // === Add Frametime label ===
                                 let frametimeLabel = "Frametime"
                                 let frametimeAttr = [
                                     NSAttributedString.Key.font: CTFontCreateWithName("Menlo-Bold" as CFString, 60 * scaleFactor, nil),
-                                    NSAttributedString.Key.foregroundColor: NSColor.white
+                                    NSAttributedString.Key.foregroundColor: NSColor.white,
+                                    NSAttributedString.Key.strokeColor: NSColor.black,
+                                    NSAttributedString.Key.strokeWidth: -2.0
                                 ]
                                 let frametimeText = NSAttributedString(string: frametimeLabel, attributes: frametimeAttr)
                                 let frametimePos = CGPoint(x: offsetX + 20 * scaleFactor, y: ftGraphY + graphHeight + 10 * scaleFactor)
@@ -941,12 +989,15 @@ public struct FrameAnalyzer {
                                 let fpsGraphLabel = "FPS"
                                 let fpsGraphAttr = [
                                     NSAttributedString.Key.font: CTFontCreateWithName("Menlo-Bold" as CFString, 60 * scaleFactor, nil),
-                                    NSAttributedString.Key.foregroundColor: NSColor.white
+                                    NSAttributedString.Key.foregroundColor: NSColor.white,
+                                    NSAttributedString.Key.strokeColor: NSColor.black,
+                                    NSAttributedString.Key.strokeWidth: -2.0
                                 ]
                                 let fpsGraphText = NSAttributedString(string: fpsGraphLabel, attributes: fpsGraphAttr)
                                 let fpsGraphPos = CGPoint(x: offsetX + 20 * scaleFactor, y: fpsGraphY + graphHeight + 10 * scaleFactor)
                                 ctx.textPosition = fpsGraphPos
                                 CTLineDraw(CTLineCreateWithAttributedString(fpsGraphText), ctx)
+
 
                                 // === Frametime Y-axis scale marks ===
                                 let uniqueFTValues = Set(visiblePoints.map { round($0.1 * 10000) / 10 })
@@ -976,10 +1027,12 @@ public struct FrameAnalyzer {
                                     let label = String(format: "%.1f", value)
                                     let attributes: [NSAttributedString.Key: Any] = [
                                         .font: CTFontCreateWithName("Menlo" as CFString, 22 * scaleFactor, nil),
-                                        .foregroundColor: NSColor.white
+                                        .foregroundColor: NSColor.white,
+                                        .strokeColor: NSColor.black,
+                                        .strokeWidth: -2.0
                                     ]
                                     let attrText = NSAttributedString(string: label, attributes: attributes)
-                                    ctx.textPosition = CGPoint(x: offsetX - 40 * scaleFactor, y: y - 8 * scaleFactor)
+                                    ctx.textPosition = CGPoint(x: offsetX - 57 * scaleFactor, y: y - 8 * scaleFactor)
                                     CTLineDraw(CTLineCreateWithAttributedString(attrText), ctx)
                                 }
 
@@ -1011,11 +1064,14 @@ public struct FrameAnalyzer {
                                     let label = String(format: "%.0f", value)
                                     let attributes: [NSAttributedString.Key: Any] = [
                                         .font: CTFontCreateWithName("Menlo" as CFString, 25 * scaleFactor, nil),
-                                        .foregroundColor: NSColor.white
+                                        .foregroundColor: NSColor.white,
+                                        .strokeColor: NSColor.black,
+                                        .strokeWidth: -2.0
                                     ]
                                     let attrText = NSAttributedString(string: label, attributes: attributes)
                                     ctx.textPosition = CGPoint(x: offsetX - 40 * scaleFactor, y: y - 8 * scaleFactor)
                                     CTLineDraw(CTLineCreateWithAttributedString(attrText), ctx)
+
                                 }
 
                                 
@@ -1088,6 +1144,8 @@ public struct FrameAnalyzer {
             
         
         
+            
+            
         func pixelBufferFromCGImage(cgImage: CGImage, size: CGSize) -> CVPixelBuffer? {
             var pixelBuffer: CVPixelBuffer?
             let options: [String: Any] = [
