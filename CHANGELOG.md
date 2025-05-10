@@ -1,5 +1,14 @@
 # Changelog
 
+## Alpha [0.2.2] - 2025-05-10
+### Added
+- Custom graph scaling option for Animated Overlay
+- Option to render the graph on only half of the frame in Animated Overlay
+### Improved
+- Frametime labels location was wrong, fixed
+- Text had no outline and was barely readable on light backgrounds, fixed
+- Slightly reduced window size for better display on smaller macbooks (like M1 Air)
+
 ## Alpha [0.2.1] - 2025-05-03
 ### Improved
 - Animated Overlay reporting 0 FPS in some frames bug fixed
