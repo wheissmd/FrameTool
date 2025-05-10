@@ -213,6 +213,9 @@ struct AppConfig: Codable {
     var tearingDetection: Bool
     var customThemeEnabled: Bool
     var themeType: String
+    var userGraphScale: CGFloat
+    var renderOneSideOnly: Bool
+    var overlayPosition: String
 }
 
 struct ContentView: View {
@@ -227,6 +230,7 @@ struct ContentView: View {
     @State private var csvExportPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.path
     @State private var droppedFilePath: String? = nil
     @State private var outputText: String = ""
+    @State private var userGraphScale: CGFloat = 100
 
     @State private var reportStatistics = false
     @State private var statisticsType = "General"
@@ -245,6 +249,12 @@ struct ContentView: View {
     @State private var customThemeEnabled = false
     @State private var themeType = "Hatsune Miku"
     private let themeOptions = ["Hatsune Miku", "Megurine Luka", "Coming Soon"]
+    
+    @State private var renderOneSideOnly = false
+    
+    @State private var overlayPosition: String = "Left"
+
+
     
     var themeArtAttribution: String {
         if customThemeEnabled && themeType == "Hatsune Miku" {
@@ -421,7 +431,7 @@ struct ContentView: View {
 
                 Spacer()
             }
-            .frame(width: 600, height: 760)
+            .frame(width: 600, height: 700)
             .disabled(isAnalyzing)
             .padding()
             .onAppear(perform: loadConfig)
@@ -514,7 +524,10 @@ struct ContentView: View {
                     graphOptions: graphOptions,
                     tearingDetection: $tearingDetection,
                     customThemeEnabled: $customThemeEnabled,
-                    themeType: $themeType
+                    themeType: $themeType,
+                    userGraphScale: $userGraphScale,
+                    renderOneSideOnly: $renderOneSideOnly,
+                    overlayPosition: $overlayPosition
                 )
                 .frame(width: 600)
                     .padding()
@@ -585,7 +598,10 @@ struct ContentView: View {
                 statsMode: statisticsType,
                 exportGraph: exportGraph,
                 graphType: graphType,
-                detectTearing: tearingDetection
+                detectTearing: tearingDetection,
+                userGraphScale: userGraphScale,
+                renderOneSideOnly: renderOneSideOnly,
+                overlayPosition: overlayPosition
             ) { result in
                 DispatchQueue.main.async {
                     self.outputText = result
@@ -595,6 +611,8 @@ struct ContentView: View {
             }
         }
     }
+    
+    
 
     func formatDuration(_ seconds: Int) -> String {
         let minutes = seconds / 60
@@ -613,7 +631,11 @@ struct ContentView: View {
             graphType: graphType,
             tearingDetection: tearingDetection,
             customThemeEnabled: customThemeEnabled,
-            themeType: themeType
+            themeType: themeType,
+            userGraphScale: userGraphScale,
+            renderOneSideOnly: renderOneSideOnly,
+            overlayPosition: overlayPosition
+
         )
         if let data = try? JSONEncoder().encode(config) {
             let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("frametool_config.json")
@@ -634,6 +656,9 @@ struct ContentView: View {
             tearingDetection = config.tearingDetection
             customThemeEnabled = config.customThemeEnabled
             themeType = config.themeType
+            userGraphScale = config.userGraphScale
+            renderOneSideOnly = config.renderOneSideOnly
+            overlayPosition = config.overlayPosition
         }
         
     }
@@ -691,7 +716,40 @@ struct SettingsPopup: View {
     @State private var isHoveringThemeLuka = false
     @State private var themeMikuFrame: CGRect = .zero
     @State private var themeLukaFrame: CGRect = .zero
+    
+    @Binding var userGraphScale: CGFloat
+    @State private var isHoveringGraphScaleSlider = false
+    @State private var graphScaleSliderFrame: CGRect = .zero
+    
+    @Binding var renderOneSideOnly: Bool
+    @State private var isHoveringRenderOneSideOnly = false
+    @State private var renderOneSideOnlyFrame: CGRect = .zero
+    
+    @Binding var overlayPosition: String
 
+    func getScalingImage(for scale: Int) -> NSImage? {
+        let value: Int
+        switch scale {
+        case 50..<55: value = 50
+        case 55..<65: value = 60
+        case 65..<75: value = 70
+        case 75..<85: value = 80
+        case 85..<95: value = 90
+        case 95..<105: value = 100
+        case 105..<115: value = 110
+        case 115..<125: value = 120
+        case 125..<135: value = 130
+        case 135..<145: value = 140
+        case 145..<150: value = 150
+        default: value = 150
+        }
+
+        return NSImage(named: "\(value)")
+    }
+
+
+
+    
     var body: some View {
         ZStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 22) {
@@ -961,6 +1019,56 @@ struct SettingsPopup: View {
                     .background(Color(NSColor.controlBackgroundColor))
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3)))
+                    
+                    if exportGraph && graphType == "Animated Overlay" {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Animated Overlay Scale")
+                                .font(.system(size: 13))
+                            HStack {
+                                GeometryReader { geo in
+                                    Slider(value: $userGraphScale, in: 50...150)
+                                        .onHover { hovering in
+                                            isHoveringGraphScaleSlider = hovering
+                                            if hovering {
+                                                graphScaleSliderFrame = geo.frame(in: .global)
+                                            }
+                                        }
+                                }
+                                .frame(height: 20) // needed for GeometryReader to show properly
+
+                                Text("\(Int(userGraphScale))")
+                                    .frame(width: 35, alignment: .trailing)
+                                    .font(.system(size: 13))
+                            }
+                        }
+                        GeometryReader { geo in
+                            HStack(spacing: 8) {
+                                Toggle(isOn: $renderOneSideOnly) {
+                                    Text("Render overlay on half of the frame")
+                                        .font(.system(size: 13))
+                                }
+                                .onHover { hovering in
+                                    isHoveringRenderOneSideOnly = hovering
+                                    if hovering {
+                                        renderOneSideOnlyFrame = geo.frame(in: .global)
+                                    }
+                                }
+
+                                Picker("", selection: $overlayPosition) {
+                                    Text("Left").tag("Left")
+                                    Text("Middle").tag("Middle")
+                                    Text("Right").tag("Right")
+                                }
+                                .frame(width: 90)
+                                .pickerStyle(MenuPickerStyle())
+                                .disabled(!renderOneSideOnly) // disable if toggle is off
+                            }
+                        }
+                        .frame(height: 24)
+
+
+
+                    }
 
                 }
                 
@@ -1181,7 +1289,7 @@ struct SettingsPopup: View {
                         .offset(x: statisticsDetailedFrame.minX, y: statisticsDetailedFrame.minY - 108)
                 }
                 if isHoveringExportGraphToggle {
-                    Text("Export graph of the frame times and FPS throughout the analyzed video.")
+                    Text("Exports graph of the frame times and FPS throughout the analyzed video.")
                         .font(.caption)
                         .padding(8)
                         .frame(maxWidth: 260, alignment: .leading)
@@ -1284,6 +1392,13 @@ struct SettingsPopup: View {
                         .offset(x: customThemeToggleFrame.minX - 35, y: customThemeToggleFrame.minY - 113)
                 }
                 if isHoveringThemeMiku {
+                    let screenHeight = NSScreen.main?.visibleFrame.height ?? 800
+                    let popupHeight: CGFloat = 200
+                    let popupBottomY = themeMikuFrame.minY + popupHeight
+                    let offsetY: CGFloat = popupBottomY > screenHeight
+                        ? themeMikuFrame.minY - popupHeight - 10
+                        : themeMikuFrame.minY - 100
+
                     VStack(alignment: .leading, spacing: 8) {
                         if let imagePath = Bundle.main.path(forResource: "Hatsune_Miku", ofType: "png"),
                            let nsImage = NSImage(contentsOfFile: imagePath) {
@@ -1304,9 +1419,16 @@ struct SettingsPopup: View {
                     .shadow(radius: 4)
                     .transition(.opacity)
                     .zIndex(10)
-                    .offset(x: themeMikuFrame.minX - 60, y: themeMikuFrame.minY - 100)
+                    .offset(x: themeMikuFrame.minX - 60, y: offsetY)
                 }
                 if isHoveringThemeLuka {
+                    let screenHeight = NSScreen.main?.visibleFrame.height ?? 800
+                    let popupHeight: CGFloat = 220
+                    let popupBottomY = themeLukaFrame.minY + popupHeight
+                    let offsetY: CGFloat = popupBottomY > screenHeight
+                        ? themeLukaFrame.minY - popupHeight - 10
+                        : themeLukaFrame.minY - 100
+
                     VStack(alignment: .leading, spacing: 8) {
                         if let imagePath = Bundle.main.path(forResource: "Megurine_Luka", ofType: "jpg"),
                            let nsImage = NSImage(contentsOfFile: imagePath) {
@@ -1327,8 +1449,65 @@ struct SettingsPopup: View {
                     .shadow(radius: 4)
                     .transition(.opacity)
                     .zIndex(10)
-                    .offset(x: themeLukaFrame.minX - 60, y: themeLukaFrame.minY - 100)
+                    .offset(x: themeLukaFrame.minX - 60, y: offsetY)
                 }
+                if isHoveringGraphScaleSlider {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Controls the size of the Animated Overlay")
+                            .font(.caption)
+
+                        if let image = getScalingImage(for: Int(userGraphScale)) {
+                            Image(nsImage: image)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(height: 220)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+
+                    }
+                    .padding(8)
+                    .frame(maxWidth: 400, alignment: .leading)
+                    .background(
+                        Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                    )
+                    .cornerRadius(8)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
+                    .shadow(radius: 4)
+                    .transition(.opacity)
+                    .zIndex(10)
+                    .offset(x: graphScaleSliderFrame.minX - 65, y: graphScaleSliderFrame.minY - 93)
+                }
+                if isHoveringRenderOneSideOnly {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Renders overlay on only one side of a frame. Useful for locating the videos with overlays side by side.")
+                            .font(.caption)
+                            .fixedSize(horizontal: false, vertical: true)
+                        
+                        if let url = Bundle.main.url(forResource: overlayPosition, withExtension: "png"),
+                           let nsImage = NSImage(contentsOf: url) {
+                            Image(nsImage: nsImage)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(height: 220)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+
+                    }
+                    .padding(8)
+                    .frame(maxWidth: 400, alignment: .leading)
+                    .background(
+                        Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                    )
+                    .cornerRadius(8)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(style: StrokeStyle()).foregroundColor(Color.gray.opacity(0.4)))
+                    .shadow(radius: 4)
+                    .transition(.opacity)
+                    .zIndex(10)
+                    .offset(x: renderOneSideOnlyFrame.minX - 35, y: renderOneSideOnlyFrame.minY - 113)
+                }
+
+
+
 
 
                 
