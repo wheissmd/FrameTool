@@ -23,6 +23,17 @@ public struct FrameAnalyzer {
     ///   - videoPath: path to the input video file
     ///   - outputPath: folder to write the CSV output
     ///   - isMultithreading: whether to analyze using multiple CPU threads
+    ///   - reportStats: output a separate csv with overall statistics
+    ///   - statsMode: detailed or general statistics
+    ///   - exportGraph: export data as a graph
+    ///   - graphType: type of the graph
+    ///   - detectTearing: try to catch tearing frames and get rid of false positives
+    ///   - userGraphScale: scale graph size for animated overlay
+    ///   - renderOneSideOnly: render graph in a half of the screen
+    ///   - overlayPosition: graph position
+    
+    
+    
     public static func runAnalysis(
             videoPath: String,
             outputPath: String,
@@ -93,9 +104,9 @@ public struct FrameAnalyzer {
                     var grayBuffer = vImage_Buffer()
                     vImageBuffer_Init(&grayBuffer, buffer.height, buffer.width, 8, vImage_Flags(kvImageNoFlags))
 
-                    let matrix: [Int16] = [54, 183, 19, 0]
+                    let matrix: [Int16] = [19, 183, 54, 0]
                     let divisor: Int32 = 256
-                    vImageMatrixMultiply_ARGB8888ToPlanar8(&buffer, &grayBuffer, matrix, divisor, nil, 0, vImage_Flags(kvImageNoFlags))
+                    let error = vImageMatrixMultiply_ARGB8888ToPlanar8(&buffer, &grayBuffer, matrix, divisor, nil, 0, vImage_Flags(kvImageNoFlags))
 
                     frames.append(grayBuffer)
                     let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
@@ -115,13 +126,90 @@ public struct FrameAnalyzer {
                 }
                 group.wait()
 
-                var lastChange = 0
+
                 var consecutiveTearing = 0
+                
+                let windowSize = 10
+                let changeWindowSize = 10
+                var frameDeltaWindow: [Double] = []
+                var frameSpikeWindow: [Bool]   = []
+                var recentDeltas:    [Double] = []
+                var recentSpikes:    [Bool]   = []
+                var lastChange = 0
+
 
                 for i in 0..<diffs.count {
                     let time = timestamps[i]
                     let diff = diffs[i]
-                    var isSceneChange = diff > 1.0
+                    
+                    
+                    // 1 scene-change test
+                    let rawChange = diff > 1.35 && hasClusterDifference(frames[i], frames[i-1])
+                    var isSceneChange = rawChange
+                    print("DBG1: i=\(i) rawChange=\(rawChange)")
+
+                    // Compute change-to-change delta
+                    let delta = time - timestamps[lastChange]
+                    print("DBG2: i=\(i) delta=\(delta) lastChange=\(lastChange)")
+
+                    // 3 Detect the lock (7 of 10 frames within ±1 ms)
+                    // To avoid encoding artifacts result in false positive outputs
+                    var lock: Double? = nil
+                    if recentDeltas.count == windowSize {
+                        for v in recentDeltas {
+                            let nearCount = recentDeltas.filter { abs($0 - v) <= 0.001 }.count
+                            if nearCount >= 7 {
+                                lock = v
+                                break
+                            }
+                        }
+                    }
+                    print("DBG3: i=\(i) recentDeltas=\(recentDeltas)")
+                    print("DBG3: i=\(i) lock=\(lock ?? -1)")   // -1 means nil
+
+                    // 4 Check ifor a genuine slow-frame spike before
+                    let sawSpikeBefore = recentSpikes.contains(true)
+                    print("DBG4: i=\(i) recentSpikes=\(recentSpikes) sawSpikeBefore=\(sawSpikeBefore)")
+
+                    // 5 Veto sub-lock dip on a rawChange if a spike is not present
+                    // corresponds to behavior of FPS locks
+                    let epsilon = 0.001
+                    if rawChange, let L = lock, delta < L - epsilon, !sawSpikeBefore {
+                        isSceneChange = false
+                        print("VETO: delta \(delta) < lock - ε (\(L - epsilon))")
+                    }
+
+                    // 6 Non-rawChanges become no-change and jump to final append
+                    if !rawChange {
+                        print("DBG6: i=\(i) skip non-rawChange")
+                        frameTimes.append((i, time, false, 0))
+                        continue
+                    }
+
+                    // 7 At this point isSceneChange may have been vetoed, log it
+                    print("DBG7: i=\(i) isSceneChange=\(isSceneChange)")
+
+                    // 8 Update your post-veto history windows if it survived
+                    if isSceneChange {
+                        recentDeltas.append(delta)
+                        if recentDeltas.count > windowSize { recentDeltas.removeFirst() }
+
+                        let didSpike = (lock != nil && delta > lock! + epsilon)
+                        recentSpikes.append(didSpike)
+                        if recentSpikes.count > windowSize { recentSpikes.removeFirst() }
+
+                        // safe, non-crashing print:
+                        if let L = lock {
+                            print("SPIKE?: delta \(delta) > lock + ε (\(L + epsilon))? \(didSpike)")
+                        } else {
+                            print("SPIKE?: no lock → didSpike=\(didSpike)")
+                        }
+                    }
+
+                    // Log change in frame
+                    if isSceneChange {
+                        print("⚠️ Change at frame \(i): diff = \(String(format: "%.3f", diff))")
+                    }
 
                     if detectTearing && i > 0 {
                         let height = Int(frames[i].height)
@@ -195,88 +283,133 @@ public struct FrameAnalyzer {
                 analysisReader.add(analysisOutput)
                 analysisReader.startReading()
 
+                let windowSize    = 10
+                let epsilon       = 0.001
+                var recentDeltas: [Double] = []
+                var recentSpikes: [Bool]   = []
+                
                 while let sampleBuffer = analysisOutput.copyNextSampleBuffer(),
                       let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
-
+                    
                     CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
                     let width = CVPixelBufferGetWidth(imageBuffer)
                     let height = CVPixelBufferGetHeight(imageBuffer)
                     let baseAddress = CVPixelBufferGetBaseAddress(imageBuffer)!
                     let rowBytes = CVPixelBufferGetBytesPerRow(imageBuffer)
-
+                    
                     var buffer = vImage_Buffer(data: baseAddress, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: rowBytes)
-
+                    
                     var grayBuffer = vImage_Buffer()
                     let grayRowBytes = width
                     grayBuffer.data = malloc(height * grayRowBytes)
                     grayBuffer.height = vImagePixelCount(height)
                     grayBuffer.width = vImagePixelCount(width)
                     grayBuffer.rowBytes = grayRowBytes
-
-                    let matrix: [Int16] = [54, 183, 19, 0]
+                    
+                    let matrix: [Int16] = [19, 183, 54, 0]
                     let divisor: Int32 = 256
                     let error = vImageMatrixMultiply_ARGB8888ToPlanar8(&buffer, &grayBuffer, matrix, divisor, nil, 0, vImage_Flags(kvImageNoFlags))
-
+                    
                     CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly)
-
+                    
                     if error == kvImageNoError {
+                        // make a copy of a gray frame
                         let bufferCopy = grayBuffer.deepCopy()
-                        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-                        let time = CMTimeGetSeconds(pts)
-
-                        var isSceneChange = true
-                        if let prev = prevBuffer {
-                            let diff = mseVImage(grayBuffer, prev)
-                            isSceneChange = diff > 1.0
-
-                            if detectTearing && index > 0 {
-                                let height = Int(grayBuffer.height)
-                                let width = Int(grayBuffer.width)
-                                let rowBytes = grayBuffer.rowBytes
-                                let sliceCount = 8
-                                let sliceHeight = height / sliceCount
-
-                                var matchPrev = 0
-
-                                for s in 0..<sliceCount {
-                                    let y = s * sliceHeight
-                                    let offset = y * rowBytes
-
-                                    let curr = vImage_Buffer(data: grayBuffer.data + offset, height: vImagePixelCount(sliceHeight), width: vImagePixelCount(width), rowBytes: rowBytes)
-                                    let prevSlice = vImage_Buffer(data: prev.data + offset, height: vImagePixelCount(sliceHeight), width: vImagePixelCount(width), rowBytes: rowBytes)
-
-                                    let mse = mseVImage(curr, prevSlice)
-                                    if mse < 5.0 && !isRegionBlack(curr) { matchPrev += 1 }
-                                }
-
-                                if matchPrev > 0 && matchPrev < sliceCount {
-                                    consecutiveTearing += 1
-                                    isSceneChange = (consecutiveTearing % 2 == 0)
-                                    print("Tearing detected at frame \(index): matchPrev=\(matchPrev), consecutive=\(consecutiveTearing)")
-                                } else {
-                                    consecutiveTearing = 0
-                                }
-                            }
-
-                            let delta = (lastChange < frameTimes.count) ? time - frameTimes[lastChange].1 : 0
-                            if isSceneChange {
-                                frameTimes.append((index, time, true, delta))
-                                lastChange = index
-                            } else {
-                                frameTimes.append((index, time, false, 0))
-                            }
-                            free(prev.data)
-                        } else {
+                        let time       = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
+                        
+                        if prevBuffer == nil {
+                            // treat first frame as a “change” with delta=0
+                            print("FIRST FRAME: idx=\(index), time=\(time)")
                             frameTimes.append((index, time, true, 0))
-                            lastChange = index
+                            lastChange   = index
+                            // seed history windows
+                            recentDeltas.append(0)
+                            recentSpikes.append(false)
+                            prevBuffer = bufferCopy
+                            index += 1
+                            free(grayBuffer.data)
+                            continue
                         }
-
+                        
+                        // 1 compute diff
+                        let diff = mseVImage(grayBuffer, prevBuffer!)
+                        let rawChange = diff > 1.35 && hasClusterDifference(grayBuffer, prevBuffer!)
+                        var isSceneChange = rawChange
+                        print("DBG1: idx=\(index) rawChange=\(rawChange)")
+                        
+                        // 2 delta since last accepted change
+                        let delta: Double = (lastChange < frameTimes.count)
+                        ? time - frameTimes[lastChange].1
+                        : 0
+                        print("DBG2: idx=\(index) delta=\(delta) lastChange=\(lastChange)")
+                        
+                        // 3 detect lock
+                        let epsilon = 0.001
+                        var lock: Double? = nil
+                        if recentDeltas.count == windowSize {
+                            for v in recentDeltas {
+                                if recentDeltas.filter({ abs($0 - v) <= epsilon }).count >= 7 {
+                                    lock = v; break
+                                }
+                            }
+                        }
+                        print("DBG3: idx=\(index) recentDeltas=\(recentDeltas)")
+                        print("DBG3: idx=\(index) lock=\(lock ?? -1)")
+                        
+                        // 4 check a real spike
+                        let sawSpikeBefore = recentSpikes.contains(true)
+                        print("DBG4: idx=\(index) recentSpikes=\(recentSpikes) sawSpikeBefore=\(sawSpikeBefore)")
+                        
+                        // 5 veto sub-lock dip if no spike
+                        if rawChange, let L = lock, delta < (L - epsilon), !sawSpikeBefore {
+                            isSceneChange = false
+                            print("VETO: idx=\(index) delta=\(delta) < lock-ε=\(L - epsilon)")
+                        }
+                        
+                        // 6 if on-rawChange append no-change and continue
+                        if !rawChange {
+                            print("DBG6: idx=\(index) skip non-rawChange")
+                            frameTimes.append((index, time, false, 0))
+                            // advance buffer and index
+                            prevBuffer?.data.deallocate()
+                            prevBuffer = bufferCopy
+                            index += 1
+                            free(grayBuffer.data)
+                            continue
+                        }
+                        
+                        // 7 log
+                        print("DBG7: idx=\(index) isSceneChange=\(isSceneChange)")
+                        
+                        // 8 if accepted, update history
+                        if isSceneChange {
+                            recentDeltas.append(delta)
+                            if recentDeltas.count > windowSize { recentDeltas.removeFirst() }
+                            let didSpike = (lock != nil && delta > lock! + epsilon)
+                            recentSpikes.append(didSpike)
+                            if recentSpikes.count > windowSize { recentSpikes.removeFirst() }
+                            if let L = lock {
+                                print("SPIKE?: idx=\(index) delta \(delta) > lock+ε \(L + epsilon)? \(didSpike)")
+                            } else {
+                                print("SPIKE?: idx=\(index) no lock → didSpike=\(didSpike)")
+                            }
+                        }
+                        
+                        // 9 final append
+                        if isSceneChange {
+                            frameTimes.append((index, time, true, delta))
+                            lastChange = index
+                        } else {
+                            frameTimes.append((index, time, false, 0))
+                        }
+                        
+                        // advance buffer and index
+                        prevBuffer?.data.deallocate()
                         prevBuffer = bufferCopy
                         index += 1
-                    } else {
-                        print("⚠️ Grayscale conversion error: \(error)")
+                        free(grayBuffer.data)
                     }
-                    free(grayBuffer.data)
+                    
                 }
 
                 if let last = prevBuffer {
@@ -1348,6 +1481,75 @@ public struct FrameAnalyzer {
 
         
     }
+    
+    public static func hasClusterDifference(_ a: vImage_Buffer, _ b: vImage_Buffer) -> Bool {
+        let w = Int(a.width), h = Int(a.height)
+        let ptrA = a.data!.assumingMemoryBound(to: UInt8.self)
+        let ptrB = b.data!.assumingMemoryBound(to: UInt8.self)
+        let blockSize = 4
+        let numX = w / blockSize, numY = h / blockSize
+        let pixelsNeeded = blockSize * blockSize / 2 + 1
+
+        // build changed‐block map
+        var changed = [[Bool]](
+          repeating: [Bool](repeating: false, count: numX),
+          count: numY
+        )
+        var totalChanged = 0
+        for by in 0..<numY {
+          for bx in 0..<numX {
+            var cnt = 0
+            let baseY = by * blockSize, baseX = bx * blockSize
+            for y in 0..<blockSize where cnt < pixelsNeeded {
+              let row = (baseY + y) * w
+              for x in 0..<blockSize {
+                let idx = row + baseX + x
+                if abs(Int(ptrA[idx]) - Int(ptrB[idx])) >= 4 {
+                  cnt += 1
+                  if cnt >= pixelsNeeded { break }
+                }
+              }
+            }
+            if cnt >= pixelsNeeded {
+              changed[by][bx] = true
+              totalChanged += 1
+            }
+          }
+        }
+        if totalChanged == 0 { return false }
+
+        // count how many changed blocks have ≥1 changed neighbor
+        var clustered = 0
+        for by in 0..<numY {
+          for bx in 0..<numX where changed[by][bx] {
+            outer: for dy in -1...1 {
+              for dx in -1...1 where (dy != 0 || dx != 0) {
+                let ny = by + dy, nx = bx + dx
+                if ny >= 0, ny < numY, nx >= 0, nx < numX, changed[ny][nx] {
+                  clustered += 1
+                  break outer
+                }
+              }
+            }
+          }
+        }
+
+        // require ≥75% of changed blocks to be clustered
+        return Double(clustered) / Double(totalChanged) >= 0.50
+    }
+
+
+
+
+
+
+
+
+
+
+
+
+
     
     
     
