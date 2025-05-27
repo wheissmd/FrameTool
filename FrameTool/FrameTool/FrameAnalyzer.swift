@@ -1025,28 +1025,17 @@ public struct FrameAnalyzer {
                                     $0.time >= currentTime - windowDuration && $0.time <= currentTime
                                 }
 
-                                // build array of the fps values
-                                let fpsList = visibleFpsPoints.map { $0.fps }
 
-                                // if there's only one *unique* FPS in this window, clamp from 0 → that value
-                                let uniqueFps = Set(fpsList)
-                                let minFps: Double
-                                let maxFps: Double
-                                // count how many distinct time buckets we have
-                                let bucketCount = visibleFpsPoints.count
+                                // clamp to zero whenever the FPS span is under 1
+                                let windowFps = visibleFpsPoints.map { $0.fps }
 
-                                if bucketCount == 1, let only = fpsList.first {
-                                    // only one bucket → clamp from zero
+                                var minFps = windowFps.min() ?? 0
+                                let maxFps = windowFps.max() ?? 0
+
+                                // only clamp when the *current* window’s span is under 1 FPS
+                                if maxFps - minFps < 1 {
                                     minFps = 0
-                                    maxFps = only
-                                    print("Only one label")
-                                } else {
-                                  // two or more buckets → normal min/max
-                                  minFps = fpsList.min()!
-                                  maxFps = fpsList.max()!
                                 }
-
-
 
                                 // compute the range (never zero)
                                 var fpsRange = maxFps - minFps
@@ -1054,7 +1043,6 @@ public struct FrameAnalyzer {
 
                                 // scale factor
                                 let fpsYScale = graphHeight / CGFloat(fpsRange)
-
 
                                 ctx.setStrokeColor(NSColor.green.cgColor)
                                 ctx.setLineWidth(2.5 * scaleFactor)
