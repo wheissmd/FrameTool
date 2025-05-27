@@ -67,7 +67,7 @@ A test sample video is provided within the `.dmg` installer to demonstrate how t
 
 ## Features
 
-- Video frametime analysis with with min, max and avg FPS output
+- Video frametime analysis with min, max and avg FPS output
 - Generation of csv files with times of every frame
 - Detailed statistics csv output
 - Graphical visualization of frame time and fps, that can either be rendered as image, interactive HTML graph or Animated overlay on top of the provided video source
@@ -81,9 +81,10 @@ A test sample video is provided within the `.dmg` installer to demonstrate how t
 - Multiple bugfixes
 - Addition of customizable graph output designs
 - Animated Overlay render optimization
-- Better statististics output options
+- Better statistics output options
 - Ability to run multiple graph outputs for a single analysis
 - Windows port with different UI framework
+- More customization and settings with a better layout
   
 ---
 
