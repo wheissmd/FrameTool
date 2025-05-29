@@ -144,7 +144,7 @@ public struct FrameAnalyzer {
                     
                     
                     // 1 scene-change test
-                    let rawChange = diff > 1.35 && hasClusterDifference(frames[i], frames[i-1])
+                    let rawChange = diff > 1 && hasClusterDifference(frames[i], frames[i-1])
                     var isSceneChange = rawChange
                     print("DBG1: i=\(i) rawChange=\(rawChange)")
 
@@ -333,7 +333,7 @@ public struct FrameAnalyzer {
                         
                         // 1 compute diff
                         let diff = mseVImage(grayBuffer, prevBuffer!)
-                        let rawChange = diff > 1.35 && hasClusterDifference(grayBuffer, prevBuffer!)
+                        let rawChange = diff > 1 && hasClusterDifference(grayBuffer, prevBuffer!)
                         var isSceneChange = rawChange
                         print("DBG1: idx=\(index) rawChange=\(rawChange)")
                         
@@ -464,7 +464,10 @@ public struct FrameAnalyzer {
         // Calculate min and max FPS from fps bucket
         let validTimes = frameTimes.compactMap { $0.3 > 0 ? $0.3 : nil }
         let fpsList = validTimes.map { 1.0 / $0 }
-        let fpsBuckets = generateFPSBuckets(from: frameTimes.filter { $0.2 && $0.3 > 0 }.map { ($0.1, $0.3) })
+        var fpsBuckets = generateFPSBuckets(from: frameTimes.filter { $0.2 && $0.3 > 0 }.map { ($0.1, $0.3) })
+        if fpsBuckets.count > 1 {
+                fpsBuckets.removeLast()
+        }
         let minFPS = fpsBuckets.map(\.fps).min() ?? 0
         let maxFPS = fpsBuckets.map(\.fps).max() ?? 0
 
@@ -542,6 +545,11 @@ public struct FrameAnalyzer {
                     fpsValues.append(fps)
                 }
                 
+                // Drop the last, partial bucket
+                if fpsTimeValues.count > 1 {
+                    fpsTimeValues.removeLast()
+                    fpsValues.removeLast()
+                }
                 
                 let trimmedFpsTime = fpsTimeValues.map { String(format: "%.2f", $0) }
                 let trimmedFpsValues = fpsValues.map { String(format: "%.2f", $0) }
@@ -818,7 +826,9 @@ public struct FrameAnalyzer {
                     let renderSize = readerTrack.naturalSize
                     let nominalFrameRate = readerTrack.nominalFrameRate
                     let durationSeconds = asset.duration.seconds
-                    let totalFramesToWrite = Int(durationSeconds * Double(nominalFrameRate))
+                    // trim off the last 0.25 s so that the last bucket (potentially wrong) is not displayed
+                    let trimmedDuration = max(0, durationSeconds - 0.25)
+                    let totalFramesToWrite = Int(trimmedDuration * Double(nominalFrameRate))
                     let imageSize = CGSize(width: Int(renderSize.width), height: Int(renderSize.height))
                     let scaleBase: CGFloat = 1260.0
                     let graphScaleValue = min(max(userGraphScale, 50), 150)
@@ -1074,7 +1084,10 @@ public struct FrameAnalyzer {
                                 // === FPS Text Box ===
                                 let currentBucket = Double(Int(currentTime / 0.25)) * 0.25
                                 let fallbackFPS = fpsBuckets.last?.fps ?? 0
-                                let liveFPS = Int(fpsBuckets.first(where: { abs($0.time - currentBucket) < 0.001 })?.fps ?? fallbackFPS)
+                                let rawFPS = fpsBuckets.first(where: { abs($0.time - currentBucket) < 0.001 })?.fps ?? fallbackFPS
+
+                                // round to nearest whole number, then display
+                                let liveFPS = Int(round(rawFPS))
                                 let fpsText = "Output FPS: \(liveFPS)"
 
                                 // Set up font
