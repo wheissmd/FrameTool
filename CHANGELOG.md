@@ -5,7 +5,7 @@
 - Version display in settings menu
 ### Improved
 - Fixed multiple bugs that lead to incorrect FPS display in animated overlay
-- Slightly adjusted sensetivity to reduce false negative results in static scenes
+- Slightly adjusted sensitivity to reduce false negative results in static scenes
 
 ## Alpha [0.2.3] - 2025-05-27
 ### Improved
