@@ -1,6 +1,6 @@
 # Changelog
 
-## Alpha [0.2.3] - 2025-05-27
+## Alpha [0.2.4] - 2025-05-29
 ### Added
 - Version display in settings menu
 ### Improved
