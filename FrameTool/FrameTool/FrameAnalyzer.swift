@@ -46,9 +46,11 @@ public struct FrameAnalyzer {
             userGraphScale: CGFloat,
             renderOneSideOnly: Bool,
             overlayPosition: String,
+            response250msEnabled: Bool,
             onComplete: @escaping (String) -> Void = { _ in }
             
         ) -> String {
+            let bucketSize = response250msEnabled ? 0.25 : 1.0
             var outputLog = ""
             func log(_ msg: String) {
                 outputLog += msg + "\n"
@@ -434,7 +436,7 @@ public struct FrameAnalyzer {
             }
         
             
-            func generateFPSBuckets(from frameDeltaValues: [(Double, Double)], step: Double = 0.25) -> [(time: Double, fps: Double)] {
+            func generateFPSBuckets(from frameDeltaValues: [(Double, Double)], step: Double) -> [(time: Double, fps: Double)] {
                 var fpsBuckets: [(Double, Double)] = []
                 guard let maxTime = frameDeltaValues.map(\.0).max() else { return fpsBuckets }
                 
@@ -464,7 +466,10 @@ public struct FrameAnalyzer {
         // Calculate min and max FPS from fps bucket
         let validTimes = frameTimes.compactMap { $0.3 > 0 ? $0.3 : nil }
         let fpsList = validTimes.map { 1.0 / $0 }
-        var fpsBuckets = generateFPSBuckets(from: frameTimes.filter { $0.2 && $0.3 > 0 }.map { ($0.1, $0.3) })
+            var fpsBuckets = generateFPSBuckets(
+                from: frameTimes.filter { $0.2 && $0.3 > 0 }.map { ($0.1, $0.3) },
+                step: bucketSize
+            )
         if fpsBuckets.count > 1 {
                 fpsBuckets.removeLast()
         }
@@ -525,7 +530,13 @@ public struct FrameAnalyzer {
                 var fpsDict = [Double: [Double]]()
                 
                 for (_, timestamp, isChange, delta) in frameTimes where isChange && delta > 0.0 {
-                    let bucket = Double(Int(timestamp / 0.25)) * 0.25
+                    let bucket: Double
+                    if response250msEnabled {
+                        bucket = Double(Int(timestamp / 0.25)) * 0.25
+                    } else {
+                        bucket = floor(timestamp) // 1-second buckets
+                    }
+
                     fpsDict[bucket, default: []].append(timestamp)
                 }
                 
@@ -827,7 +838,7 @@ public struct FrameAnalyzer {
                     let nominalFrameRate = readerTrack.nominalFrameRate
                     let durationSeconds = asset.duration.seconds
                     // trim off the last 0.25 s so that the last bucket (potentially wrong) is not displayed
-                    let trimmedDuration = max(0, durationSeconds - 0.25)
+                    let trimmedDuration = max(0, durationSeconds - bucketSize)
                     let totalFramesToWrite = Int(trimmedDuration * Double(nominalFrameRate))
                     let imageSize = CGSize(width: Int(renderSize.width), height: Int(renderSize.height))
                     let scaleBase: CGFloat = 1260.0
@@ -1010,11 +1021,10 @@ public struct FrameAnalyzer {
 
                                 // === FPS Graph ===
                                 var fpsBuckets: [(time: Double, fps: Double)] = []
-                                let step: Double = 0.25
                                 var bucketTime: Double = 0.0
 
                                 while bucketTime < currentTime {
-                                    let next = bucketTime + step
+                                    let next = bucketTime + bucketSize
                                     let timestamps = frameDeltaValues
                                         .filter { $0.0 >= bucketTime && $0.0 < next }
                                         .map { $0.0 }
@@ -1082,7 +1092,7 @@ public struct FrameAnalyzer {
                                 ctx.stroke(CGRect(x: offsetX, y: fpsGraphY, width: graphWidth, height: 0))
 
                                 // === FPS Text Box ===
-                                let currentBucket = Double(Int(currentTime / 0.25)) * 0.25
+                                let currentBucket = floor(currentTime / bucketSize) * bucketSize
                                 let fallbackFPS = fpsBuckets.last?.fps ?? 0
                                 let rawFPS = fpsBuckets.first(where: { abs($0.time - currentBucket) < 0.001 })?.fps ?? fallbackFPS
 

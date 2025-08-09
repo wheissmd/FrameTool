@@ -216,6 +216,7 @@ struct AppConfig: Codable {
     var userGraphScale: CGFloat
     var renderOneSideOnly: Bool
     var overlayPosition: String
+    var response250msEnabled: Bool
 }
 
 struct ContentView: View {
@@ -253,6 +254,8 @@ struct ContentView: View {
     @State private var renderOneSideOnly = false
     
     @State private var overlayPosition: String = "Left"
+    
+    @State private var response250msEnabled = false
 
 
     
@@ -527,7 +530,8 @@ struct ContentView: View {
                     themeType: $themeType,
                     userGraphScale: $userGraphScale,
                     renderOneSideOnly: $renderOneSideOnly,
-                    overlayPosition: $overlayPosition
+                    overlayPosition: $overlayPosition,
+                    response250msEnabled: $response250msEnabled
                 )
                 .frame(width: 600)
                     .padding()
@@ -601,7 +605,8 @@ struct ContentView: View {
                 detectTearing: tearingDetection,
                 userGraphScale: userGraphScale,
                 renderOneSideOnly: renderOneSideOnly,
-                overlayPosition: overlayPosition
+                overlayPosition: overlayPosition,
+                response250msEnabled: response250msEnabled
             ) { result in
                 DispatchQueue.main.async {
                     self.outputText = result
@@ -634,7 +639,8 @@ struct ContentView: View {
             themeType: themeType,
             userGraphScale: userGraphScale,
             renderOneSideOnly: renderOneSideOnly,
-            overlayPosition: overlayPosition
+            overlayPosition: overlayPosition,
+            response250msEnabled: response250msEnabled
 
         )
         if let data = try? JSONEncoder().encode(config) {
@@ -659,6 +665,7 @@ struct ContentView: View {
             userGraphScale = config.userGraphScale
             renderOneSideOnly = config.renderOneSideOnly
             overlayPosition = config.overlayPosition
+            response250msEnabled = config.response250msEnabled
         }
         
     }
@@ -726,6 +733,10 @@ struct SettingsPopup: View {
     @State private var renderOneSideOnlyFrame: CGRect = .zero
     
     @Binding var overlayPosition: String
+    
+    @Binding var response250msEnabled: Bool
+    @State private var isHoveringResponseRateToggle = false
+    @State private var responseRateToggleFrame: CGRect = .zero
 
     func getScalingImage(for scale: Int) -> NSImage? {
         let value: Int
@@ -775,6 +786,29 @@ struct SettingsPopup: View {
                         )
 
                 }
+                
+                // === RESPONSE RATE (simple toggle, right after Multithreading) ===
+                GeometryReader { geo in
+                    Toggle("Enable 250ms Response Rate", isOn: $response250msEnabled)
+                        .onHover { hovering in
+                            isHoveringResponseRateToggle = hovering
+                            if hovering {
+                                responseRateToggleFrame = geo.frame(in: .global)
+                            }
+                        }
+                }
+                .frame(height: 20)
+
+                if response250msEnabled {
+                    Text("⚠️ WARNING: 250 ms response rate may produce inaccurate FPS reports when analyzing locked-framerate footage.")
+                        .font(.caption)
+                        .foregroundColor(
+                            customThemeEnabled && themeType == "Hatsune Miku"
+                            ? Color(red: 1.0, green: 0.9, blue: 0.4)
+                            : .orange
+                        )
+                }
+
                 
                 if tearingDetection || isOptionKeyPressed {
                     GeometryReader { geo in
@@ -1192,7 +1226,7 @@ struct SettingsPopup: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3)))
                 }
-                Text("v0.2.4-Alpha")
+                Text("v0.2.5-Alpha")
                     .font(.caption2)
                     .foregroundColor(.white)
 
@@ -1215,6 +1249,19 @@ struct SettingsPopup: View {
                         .transition(.opacity)
                         .zIndex(10)
                         .offset(x: multithreadingToggleFrame.minX - 8, y: multithreadingToggleFrame.minY - 113)
+                }
+                if isHoveringResponseRateToggle {
+                    Text("Default response rate is 1000 ms. Enabling 250 ms increases precision but reduces accuracy, and is not recommended when analyzing locked-framerate footage.")
+                        .font(.caption)
+                        .padding(8)
+                        .frame(maxWidth: 260, alignment: .leading)
+                        .background(Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType))
+                        .cornerRadius(8)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
+                        .shadow(radius: 4)
+                        .transition(.opacity)
+                        .zIndex(10)
+                        .offset(x: responseRateToggleFrame.minX - 8, y: responseRateToggleFrame.minY - 113)
                 }
                 if isHoveringTearingDetectionToggle {
                     Text("Tearing detection predicts the original framerate in recordings with screen tearing. This feature is EXPERIMENTAL and known to cause false positives or negatives. Use it mainly for testing or entertainment purposes.")
