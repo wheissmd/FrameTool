@@ -47,10 +47,28 @@ public struct FrameAnalyzer {
             renderOneSideOnly: Bool,
             overlayPosition: String,
             response250msEnabled: Bool,
+            graphColorHex: String,
             onComplete: @escaping (String) -> Void = { _ in }
             
         ) -> String {
             let bucketSize = response250msEnabled ? 0.25 : 1.0
+            let chosenNSColor: NSColor = {
+                let hex = graphColorHex.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
+                guard let v = UInt32(hex.count == 6 ? hex + "FF" : hex, radix: 16) else { return .green }
+                let r = CGFloat((v >> 24) & 0xFF) / 255
+                let g = CGFloat((v >> 16) & 0xFF) / 255
+                let b = CGFloat((v >>  8) & 0xFF) / 255
+                let a = CGFloat((v >>  0) & 0xFF) / 255
+                return NSColor(srgbRed: r, green: g, blue: b, alpha: a)
+            }()
+            let chosenCGColor = chosenNSColor.cgColor
+            let cssHexNoAlpha: String = {
+                guard let rgb = chosenNSColor.usingColorSpace(.sRGB) else { return "#00AA00" }
+                let r = Int(round(rgb.redComponent   * 255))
+                let g = Int(round(rgb.greenComponent * 255))
+                let b = Int(round(rgb.blueComponent  * 255))
+                return String(format: "#%02X%02X%02X", r, g, b)
+            }()
             var outputLog = ""
             func log(_ msg: String) {
                 outputLog += msg + "\n"
@@ -586,7 +604,7 @@ public struct FrameAnalyzer {
                             mode: 'lines',
                             type: 'scatter',
                             name: 'Frametime (ms)',
-                            line: { color: 'green' }
+                            line: { color: '\(cssHexNoAlpha)' }
                         };
                         var layout1 = {
                             title: 'Frametime',
@@ -606,7 +624,7 @@ public struct FrameAnalyzer {
                             mode: 'lines+markers',
                             type: 'scatter',
                             name: 'FPS',
-                            line: { color: 'darkgreen' }
+                            line: { color: '\(cssHexNoAlpha)' }
                         };
                         var layout2 = {
                             title: 'Frames Per Second',
@@ -638,8 +656,8 @@ public struct FrameAnalyzer {
                     let graphHeight = (height - Int(margin) * 3) / 2
                     
                     let colorBg = NSColor.black
-                    let colorLine1 = NSColor.green
-                    let colorLine2 = NSColor.systemGreen
+                    let colorLine1 = chosenNSColor
+                    let colorLine2 = chosenNSColor
                     let colorText = NSColor.white
                     
                     let image = NSImage(size: NSSize(width: width, height: height))
@@ -1004,7 +1022,7 @@ public struct FrameAnalyzer {
                                 let minDelta: Double = 0
                                 let yScaleFT = graphHeight / CGFloat(maxDelta - minDelta)
 
-                                ctx.setStrokeColor(NSColor.green.cgColor)
+                                ctx.setStrokeColor(chosenCGColor)
                                 ctx.setLineWidth(2.5 * scaleFactor)
                                 ctx.beginPath()
 
@@ -1064,7 +1082,7 @@ public struct FrameAnalyzer {
                                 // scale factor
                                 let fpsYScale = graphHeight / CGFloat(fpsRange)
 
-                                ctx.setStrokeColor(NSColor.green.cgColor)
+                                ctx.setStrokeColor(chosenCGColor)
                                 ctx.setLineWidth(2.5 * scaleFactor)
                                 ctx.beginPath()
 

@@ -81,6 +81,8 @@ extension View {
     }
 }
 
+
+
 extension Color {
     static let selectorUnselected = Color(red: 60 / 255, green: 60 / 255, blue: 60 / 255)
 
@@ -135,7 +137,31 @@ extension Color {
 
 
 
+struct ColorSelect {
+    static func fromHex(_ hex: String) -> Color? {
+        var s = hex.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
+        guard s.count == 6 || s.count == 8 else { return nil }
+        if s.count == 6 { s += "FF" }        // add alpha if missing
+        guard let v = UInt32(s, radix: 16) else { return nil }
+        let r = Double((v >> 24) & 0xFF) / 255.0
+        let g = Double((v >> 16) & 0xFF) / 255.0
+        let b = Double((v >>  8) & 0xFF) / 255.0
+        let a = Double((v >>  0) & 0xFF) / 255.0
+        return Color(.sRGB, red: r, green: g, blue: b, opacity: a)
+    }
 
+    static func toHex(_ color: Color, includeAlpha: Bool = true) -> String? {
+        let ns = NSColor(color)
+        guard let rgb = ns.usingColorSpace(.sRGB) else { return nil }
+        let r = max(0, min(255, Int(round(rgb.redComponent   * 255))))
+        let g = max(0, min(255, Int(round(rgb.greenComponent * 255))))
+        let b = max(0, min(255, Int(round(rgb.blueComponent  * 255))))
+        let a = max(0, min(255, Int(round(rgb.alphaComponent * 255))))
+        return includeAlpha
+            ? String(format: "#%02X%02X%02X%02X", r, g, b, a)
+            : String(format: "#%02X%02X%02X", r, g, b)
+    }
+}
 
 /// Shape for selectively rounded corners
 struct RoundedCorner: Shape {
@@ -217,6 +243,7 @@ struct AppConfig: Codable {
     var renderOneSideOnly: Bool
     var overlayPosition: String
     var response250msEnabled: Bool
+    var graphColorHex: String
 }
 
 struct ContentView: View {
@@ -256,6 +283,9 @@ struct ContentView: View {
     @State private var overlayPosition: String = "Left"
     
     @State private var response250msEnabled = false
+    
+    @State private var graphColor: Color = (ColorSelect.fromHex("#33B170") ?? .green)
+
 
 
     
@@ -515,43 +545,48 @@ struct ContentView: View {
 
 
 
-            if showSettings {
-                SettingsPopup(
-                    multithreadingEnabled: $multithreadingEnabled,
-                    measureProcessingTime: $measureProcessingTime,
-                    reportStatistics: $reportStatistics,
-                    statisticsType: $statisticsType,
-                    statisticsOptions: statisticsOptions,
-                    exportGraph: $exportGraph,
-                    graphType: $graphType,
-                    graphOptions: graphOptions,
-                    tearingDetection: $tearingDetection,
-                    customThemeEnabled: $customThemeEnabled,
-                    themeType: $themeType,
-                    userGraphScale: $userGraphScale,
-                    renderOneSideOnly: $renderOneSideOnly,
-                    overlayPosition: $overlayPosition,
-                    response250msEnabled: $response250msEnabled
-                )
-                .frame(width: 600)
+            ZStack {
+                if showSettings {
+                    SettingsPopup(
+                        multithreadingEnabled: $multithreadingEnabled,
+                        measureProcessingTime: $measureProcessingTime,
+                        reportStatistics: $reportStatistics,
+                        statisticsType: $statisticsType,
+                        statisticsOptions: statisticsOptions,
+                        exportGraph: $exportGraph,
+                        graphType: $graphType,
+                        graphOptions: graphOptions,
+                        tearingDetection: $tearingDetection,
+                        customThemeEnabled: $customThemeEnabled,
+                        themeType: $themeType,
+                        userGraphScale: $userGraphScale,
+                        renderOneSideOnly: $renderOneSideOnly,
+                        overlayPosition: $overlayPosition,
+                        response250msEnabled: $response250msEnabled,
+                        graphColor: $graphColor
+                    )
+                    .frame(width: 600)
                     .padding()
                     .background(
                         RoundedRectangle(cornerRadius: 12)
                             .fill(
                                 customThemeEnabled
                                 ? (themeType == "Hatsune Miku"
-                                    ? Color(red: 104/255, green: 160/255, blue: 204/255) // Miku
+                                    ? Color(red: 104/255, green: 160/255, blue: 204/255)
                                     : (themeType == "Megurine Luka"
-                                        ? Color(red: 191/255, green: 116/255, blue: 141/255) // Luka
-                                        : Color(NSColor.windowBackgroundColor))) // Other custom themes
+                                        ? Color(red: 191/255, green: 116/255, blue: 141/255)
+                                        : Color(NSColor.windowBackgroundColor)))
                                 : Color(NSColor.windowBackgroundColor)
                             )
                     )
-
                     .shadow(radius: 10)
                     .padding(.top, 60)
                     .offset(x: 0, y: 33)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
+            .animation(.easeInOut(duration: 0.25), value: showSettings)
+
             
         }
         .frame(width: 600)
@@ -606,7 +641,8 @@ struct ContentView: View {
                 userGraphScale: userGraphScale,
                 renderOneSideOnly: renderOneSideOnly,
                 overlayPosition: overlayPosition,
-                response250msEnabled: response250msEnabled
+                response250msEnabled: response250msEnabled,
+                graphColorHex: ColorSelect.toHex(graphColor)!
             ) { result in
                 DispatchQueue.main.async {
                     self.outputText = result
@@ -640,7 +676,8 @@ struct ContentView: View {
             userGraphScale: userGraphScale,
             renderOneSideOnly: renderOneSideOnly,
             overlayPosition: overlayPosition,
-            response250msEnabled: response250msEnabled
+            response250msEnabled: response250msEnabled,
+            graphColorHex: ColorSelect.toHex(graphColor)!
 
         )
         if let data = try? JSONEncoder().encode(config) {
@@ -666,6 +703,7 @@ struct ContentView: View {
             renderOneSideOnly = config.renderOneSideOnly
             overlayPosition = config.overlayPosition
             response250msEnabled = config.response250msEnabled
+            graphColor = ColorSelect.fromHex(config.graphColorHex)!
         }
         
     }
@@ -737,6 +775,12 @@ struct SettingsPopup: View {
     @Binding var response250msEnabled: Bool
     @State private var isHoveringResponseRateToggle = false
     @State private var responseRateToggleFrame: CGRect = .zero
+    
+    @Binding var graphColor: Color
+    @State private var isHoveringGraphColor = false
+    @State private var graphColorFrame: CGRect = .zero
+    
+    
 
     func getScalingImage(for scale: Int) -> NSImage? {
         let value: Int
@@ -767,9 +811,11 @@ struct SettingsPopup: View {
                 GeometryReader { geo in
                     Toggle("Enable Multithreading", isOn: $multithreadingEnabled)
                         .onHover { hovering in
-                            isHoveringMultithreadingToggle = hovering
-                            if hovering {
-                                multithreadingToggleFrame = geo.frame(in: .global)
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                isHoveringMultithreadingToggle = hovering
+                                if hovering {
+                                    multithreadingToggleFrame = geo.frame(in: .global)
+                                }
                             }
                         }
                 }
@@ -787,13 +833,14 @@ struct SettingsPopup: View {
 
                 }
                 
-                // === RESPONSE RATE (simple toggle, right after Multithreading) ===
                 GeometryReader { geo in
-                    Toggle("Enable 250ms Response Rate", isOn: $response250msEnabled)
+                    Toggle("Enable 250 ms Response Rate", isOn: $response250msEnabled)
                         .onHover { hovering in
-                            isHoveringResponseRateToggle = hovering
-                            if hovering {
-                                responseRateToggleFrame = geo.frame(in: .global)
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                isHoveringResponseRateToggle = hovering
+                                if hovering {
+                                    responseRateToggleFrame = geo.frame(in: .global)
+                                }
                             }
                         }
                 }
@@ -814,9 +861,11 @@ struct SettingsPopup: View {
                     GeometryReader { geo in
                         Toggle("Tearing Detection (Experimental)", isOn: $tearingDetection)
                             .onHover { hovering in
-                                isHoveringTearingDetectionToggle = hovering
-                                if hovering {
-                                    tearingDetectionToggleFrame = geo.frame(in: .global)
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    isHoveringTearingDetectionToggle = hovering
+                                    if hovering {
+                                        tearingDetectionToggleFrame = geo.frame(in: .global)
+                                    }
                                 }
                             }
                     }
@@ -826,9 +875,11 @@ struct SettingsPopup: View {
                 GeometryReader { geo in
                     Toggle("Measure Processing Time", isOn: $measureProcessingTime)
                         .onHover { hovering in
-                            isHoveringMeasureTimeToggle = hovering
-                            if hovering {
-                                measureTimeToggleFrame = geo.frame(in: .global)
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                isHoveringMeasureTimeToggle = hovering
+                                if hovering {
+                                    measureTimeToggleFrame = geo.frame(in: .global)
+                                }
                             }
                         }
                 }
@@ -837,9 +888,11 @@ struct SettingsPopup: View {
                 GeometryReader { geo in
                     Toggle("Report Statistics to CSV", isOn: $reportStatistics)
                         .onHover { hovering in
-                            isHoveringReportCSVToggle = hovering
-                            if hovering {
-                                reportCSVToggleFrame = geo.frame(in: .global)
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                isHoveringReportCSVToggle = hovering
+                                if hovering {
+                                    reportCSVToggleFrame = geo.frame(in: .global)
+                                }
                             }
                         }
                 }
@@ -873,7 +926,9 @@ struct SettingsPopup: View {
                                 .contentShape(Rectangle())
                                 .onTapGesture { statisticsType = "General" }
                                 .onHover { hovering in
-                                    isHoveringStatisticsGeneral = hovering
+                                    withAnimation(.easeInOut(duration: 0.25)) {
+                                        isHoveringStatisticsGeneral = hovering
+                                    }
                                 }
 
                             GeometryReader { geo in
@@ -912,7 +967,9 @@ struct SettingsPopup: View {
                                 .contentShape(Rectangle())
                                 .onTapGesture { statisticsType = "Detailed" }
                                 .onHover { hovering in
-                                    isHoveringStatisticsDetailed = hovering
+                                    withAnimation(.easeInOut(duration: 0.25)) {
+                                        isHoveringStatisticsDetailed = hovering
+                                    }
                                 }
 
                             GeometryReader { geo in
@@ -938,9 +995,11 @@ struct SettingsPopup: View {
                     GeometryReader { geo in
                         Toggle("Export Graph", isOn: $exportGraph)
                             .onHover { hovering in
-                                isHoveringExportGraphToggle = hovering
-                                if hovering {
-                                    exportGraphToggleFrame = geo.frame(in: .global)
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    isHoveringExportGraphToggle = hovering
+                                    if hovering {
+                                        exportGraphToggleFrame = geo.frame(in: .global)
+                                    }
                                 }
                             }
                     }
@@ -974,7 +1033,10 @@ struct SettingsPopup: View {
                                 .cornerRadius(6, corners: [.topLeft])
                                 .contentShape(Rectangle())
                                 .onTapGesture { graphType = "Image" }
-                                .onHover { hovering in isHoveringGraphImage = hovering }
+                                .onHover { hovering in
+                                    withAnimation(.easeInOut(duration: 0.25)) {
+                                        isHoveringGraphImage = hovering }
+                                }
                             
                             GeometryReader { geo in
                                 Color.clear
@@ -1006,7 +1068,10 @@ struct SettingsPopup: View {
                                 )
                                 .contentShape(Rectangle())
                                 .onTapGesture { graphType = "Interactive" }
-                                .onHover { hovering in isHoveringGraphInteractive = hovering }
+                                .onHover { hovering in
+                                    withAnimation(.easeInOut(duration: 0.25)) {
+                                        isHoveringGraphInteractive = hovering }
+                                }
                             
                             GeometryReader { geo in
                                 Color.clear
@@ -1039,7 +1104,10 @@ struct SettingsPopup: View {
                                 .cornerRadius(6, corners: [.topRight])
                                 .contentShape(Rectangle())
                                 .onTapGesture { graphType = "Animated Overlay" }
-                                .onHover { hovering in isHoveringGraphAnimated = hovering }
+                                .onHover { hovering in
+                                    withAnimation(.easeInOut(duration: 0.25)) {
+                                        isHoveringGraphAnimated = hovering }
+                                }
                             
                             GeometryReader { geo in
                                 Color.clear
@@ -1062,9 +1130,11 @@ struct SettingsPopup: View {
                                 GeometryReader { geo in
                                     Slider(value: $userGraphScale, in: 50...150)
                                         .onHover { hovering in
-                                            isHoveringGraphScaleSlider = hovering
-                                            if hovering {
-                                                graphScaleSliderFrame = geo.frame(in: .global)
+                                            withAnimation(.easeInOut(duration: 0.25)) {
+                                                isHoveringGraphScaleSlider = hovering
+                                                if hovering {
+                                                    graphScaleSliderFrame = geo.frame(in: .global)
+                                                }
                                             }
                                         }
                                 }
@@ -1082,9 +1152,11 @@ struct SettingsPopup: View {
                                         .font(.system(size: 13))
                                 }
                                 .onHover { hovering in
-                                    isHoveringRenderOneSideOnly = hovering
-                                    if hovering {
-                                        renderOneSideOnlyFrame = geo.frame(in: .global)
+                                    withAnimation(.easeInOut(duration: 0.25)) {
+                                        isHoveringRenderOneSideOnly = hovering
+                                        if hovering {
+                                            renderOneSideOnlyFrame = geo.frame(in: .global)
+                                        }
                                     }
                                 }
 
@@ -1103,6 +1175,32 @@ struct SettingsPopup: View {
 
 
                     }
+                    
+                    if exportGraph {
+                        GeometryReader { geo in
+                            HStack(spacing: 8) {
+                                Text("Exported Graph Colour   ")
+                                    .font(.system(size: 13))
+                                    .onHover { hovering in
+                                        withAnimation(.easeInOut(duration: 0.25)) {
+                                            isHoveringGraphColor = hovering
+                                            if hovering { graphColorFrame = geo.frame(in: .global) }
+                                        }
+                                    }
+
+                                // Color swatch immediately next to text
+                                ColorPicker("", selection: $graphColor, supportsOpacity: true)
+                                    .labelsHidden()
+                                    .frame(width: 24, height: 24)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 4)
+                                            .stroke(Color.gray.opacity(0.4))
+                                    )
+                                    .help("Choose colour of the graph")
+                            }
+                        }
+                        .frame(height: 24)
+                    }
 
                 }
                 
@@ -1110,9 +1208,11 @@ struct SettingsPopup: View {
                     GeometryReader { geo in
                         Toggle("Use Custom Theme", isOn: $customThemeEnabled)
                             .onHover { hovering in
-                                isHoveringCustomThemeToggle = hovering
-                                if hovering {
-                                    customThemeToggleFrame = geo.frame(in: .global)
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    isHoveringCustomThemeToggle = hovering
+                                    if hovering {
+                                        customThemeToggleFrame = geo.frame(in: .global)
+                                    }
                                 }
                             }
                     }
@@ -1147,7 +1247,9 @@ struct SettingsPopup: View {
                                     themeType = "Hatsune Miku"
                                 }
                                 .onHover { hovering in
-                                    isHoveringThemeMiku = hovering
+                                    withAnimation(.easeInOut(duration: 0.25)) {
+                                        isHoveringThemeMiku = hovering
+                                    }
                                 }
 
                             GeometryReader { geo in
@@ -1186,7 +1288,9 @@ struct SettingsPopup: View {
                                     themeType = "Megurine Luka"
                                 }
                                 .onHover { hovering in
-                                    isHoveringThemeLuka = hovering
+                                    withAnimation(.easeInOut(duration: 0.25)) {
+                                        isHoveringThemeLuka = hovering
+                                    }
                                 }
 
                             GeometryReader { geo in
@@ -1263,6 +1367,20 @@ struct SettingsPopup: View {
                         .zIndex(10)
                         .offset(x: responseRateToggleFrame.minX - 8, y: responseRateToggleFrame.minY - 113)
                 }
+                if isHoveringGraphColor {
+                    Text("Choose colour of the graph")
+                        .font(.caption)
+                        .padding(8)
+                        .frame(maxWidth: 260, alignment: .leading)
+                        .background(Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType))
+                        .cornerRadius(8)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
+                        .shadow(radius: 4)
+                        .transition(.opacity)
+                        .zIndex(10)
+                        .offset(x: graphColorFrame.minX - 8, y: graphColorFrame.minY - 113)
+                }
+
                 if isHoveringTearingDetectionToggle {
                     Text("Tearing detection predicts the original framerate in recordings with screen tearing. This feature is EXPERIMENTAL and known to cause false positives or negatives. Use it mainly for testing or entertainment purposes.")
                         .font(.caption)
@@ -1354,9 +1472,18 @@ struct SettingsPopup: View {
                         .offset(x: exportGraphToggleFrame.minX - 80, y: exportGraphToggleFrame.minY - 113)
                 }
                 if isHoveringGraphImage {
+                    let popupHeight: CGFloat = 360
+                    let windowContentFrame = NSApp.mainWindow?.contentView?.frame ?? .zero
+                    let popupBottomY = graphImageFrame.maxY
+
+                    let offsetY: CGFloat = (popupBottomY + popupHeight > windowContentFrame.maxY)
+                        ? graphImageFrame.minY - popupHeight - 145
+                        : graphImageFrame.minY - 93
+
                     VStack(alignment: .leading, spacing: 8) {
-                            Text("Exports a high resolution image with FPS and Frametime graphs.")
-                                .font(.caption)
+                        Text("Exports a high resolution image with FPS and Frametime graphs.")
+                            .font(.caption)
+                        
                         if let imagePath = Bundle.main.path(forResource: "Image", ofType: "png"),
                            let nsImage = NSImage(contentsOfFile: imagePath) {
                             Image(nsImage: nsImage)
@@ -1364,23 +1491,29 @@ struct SettingsPopup: View {
                                 .scaledToFit()
                                 .frame(width: 380, height: 320)
                         }
-
-                        }
-                        .padding(8)
-                        .frame(maxWidth: 400, alignment: .leading)
-                        .background(
-                            Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
-                        )
-                        .cornerRadius(8)
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
-                        .shadow(radius: 4)
-                        .transition(.opacity)
-                        .zIndex(10)
-                        .offset(x: graphImageFrame.minX - 120, y: graphImageFrame.minY - 93)
-                    
-                    
+                    }
+                    .padding(8)
+                    .frame(maxWidth: 400, alignment: .leading)
+                    .background(
+                        Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                    )
+                    .cornerRadius(8)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
+                    .shadow(radius: 4)
+                    .transition(.opacity)
+                    .zIndex(10)
+                    .offset(x: graphImageFrame.minX - 120, y: offsetY)
                 }
+
                 if isHoveringGraphInteractive {
+                    let popupHeight: CGFloat = 360
+                    let windowContentFrame = NSApp.mainWindow?.contentView?.frame ?? .zero
+                    let popupBottomY = graphInteractiveFrame.maxY
+
+                    let offsetY: CGFloat = (popupBottomY + popupHeight > windowContentFrame.maxY)
+                        ? graphInteractiveFrame.minY - popupHeight - 145
+                        : graphInteractiveFrame.minY - 93
+
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Exports an interactive HTML graph of FPS and Frametime.")
                             .font(.caption)
@@ -1400,9 +1533,8 @@ struct SettingsPopup: View {
                     .shadow(radius: 4)
                     .transition(.opacity)
                     .zIndex(10)
-                    .offset(x: graphInteractiveFrame.minX - 45, y: graphInteractiveFrame.minY - 93)
+                    .offset(x: graphInteractiveFrame.minX - 105, y: offsetY)
                 }
-
 
                 if isHoveringGraphAnimated {
                     VStack(alignment: .leading, spacing: 8) {
@@ -1442,11 +1574,12 @@ struct SettingsPopup: View {
                         .offset(x: customThemeToggleFrame.minX - 35, y: customThemeToggleFrame.minY - 113)
                 }
                 if isHoveringThemeMiku {
-                    let screenHeight = NSScreen.main?.visibleFrame.height ?? 800
                     let popupHeight: CGFloat = 200
-                    let popupBottomY = themeMikuFrame.minY + popupHeight
-                    let offsetY: CGFloat = popupBottomY > screenHeight
-                        ? themeMikuFrame.minY - popupHeight - 10
+                    let windowContentFrame = NSApp.mainWindow?.contentView?.frame ?? .zero
+                    let popupBottomY = themeMikuFrame.maxY
+
+                    let offsetY: CGFloat = (popupBottomY + popupHeight > windowContentFrame.maxY)
+                        ? themeMikuFrame.minY - popupHeight - 145
                         : themeMikuFrame.minY - 100
 
                     VStack(alignment: .leading, spacing: 8) {
@@ -1471,12 +1604,15 @@ struct SettingsPopup: View {
                     .zIndex(10)
                     .offset(x: themeMikuFrame.minX - 60, y: offsetY)
                 }
+
                 if isHoveringThemeLuka {
-                    let screenHeight = NSScreen.main?.visibleFrame.height ?? 800
                     let popupHeight: CGFloat = 220
-                    let popupBottomY = themeLukaFrame.minY + popupHeight
-                    let offsetY: CGFloat = popupBottomY > screenHeight
-                        ? themeLukaFrame.minY - popupHeight - 10
+                    let windowContentFrame = NSApp.mainWindow?.contentView?.frame ?? .zero
+                    let popupBottomY = themeLukaFrame.maxY
+
+                    // Compare within the content area
+                    let offsetY: CGFloat = (popupBottomY + popupHeight > windowContentFrame.maxY)
+                        ? themeLukaFrame.minY - popupHeight - 145
                         : themeLukaFrame.minY - 100
 
                     VStack(alignment: .leading, spacing: 8) {
@@ -1501,7 +1637,16 @@ struct SettingsPopup: View {
                     .zIndex(10)
                     .offset(x: themeLukaFrame.minX - 60, y: offsetY)
                 }
+
                 if isHoveringGraphScaleSlider {
+                    let popupHeight: CGFloat = 260
+                    let windowContentFrame = NSApp.mainWindow?.contentView?.frame ?? .zero
+                    let popupBottomY = graphScaleSliderFrame.maxY
+
+                    let offsetY: CGFloat = (popupBottomY + popupHeight > windowContentFrame.maxY)
+                        ? graphScaleSliderFrame.minY - popupHeight - 145
+                        : graphScaleSliderFrame.minY - 93
+
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Controls the size of the Animated Overlay")
                             .font(.caption)
@@ -1513,7 +1658,6 @@ struct SettingsPopup: View {
                                 .frame(height: 220)
                                 .clipShape(RoundedRectangle(cornerRadius: 6))
                         }
-
                     }
                     .padding(8)
                     .frame(maxWidth: 400, alignment: .leading)
@@ -1525,9 +1669,17 @@ struct SettingsPopup: View {
                     .shadow(radius: 4)
                     .transition(.opacity)
                     .zIndex(10)
-                    .offset(x: graphScaleSliderFrame.minX - 65, y: graphScaleSliderFrame.minY - 93)
+                    .offset(x: graphScaleSliderFrame.minX - 65, y: offsetY)
                 }
+
                 if isHoveringRenderOneSideOnly {
+                    let popupHeight: CGFloat = 250
+                    let windowContentFrame = NSApp.mainWindow?.contentView?.frame ?? .zero
+                    let popupBottomY = renderOneSideOnlyFrame.maxY
+                    let offsetY: CGFloat = (popupBottomY + popupHeight > windowContentFrame.maxY)
+                        ? renderOneSideOnlyFrame.minY - popupHeight - 158
+                        : renderOneSideOnlyFrame.minY - 113
+
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Renders overlay on only one side of a frame. Useful for locating the videos with overlays side by side.")
                             .font(.caption)
@@ -1541,7 +1693,6 @@ struct SettingsPopup: View {
                                 .frame(height: 220)
                                 .clipShape(RoundedRectangle(cornerRadius: 6))
                         }
-
                     }
                     .padding(8)
                     .frame(maxWidth: 400, alignment: .leading)
@@ -1553,8 +1704,9 @@ struct SettingsPopup: View {
                     .shadow(radius: 4)
                     .transition(.opacity)
                     .zIndex(10)
-                    .offset(x: renderOneSideOnlyFrame.minX - 35, y: renderOneSideOnlyFrame.minY - 113)
+                    .offset(x: renderOneSideOnlyFrame.minX - 35, y: offsetY)
                 }
+
 
 
 
