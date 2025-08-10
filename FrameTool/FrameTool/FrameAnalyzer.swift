@@ -38,22 +38,27 @@ public struct FrameAnalyzer {
     
     
     public static func runAnalysis(
-            videoPath: String,
-            outputPath: String,
-            isMultithreading: Bool,
-            reportStats: Bool,
-            statsMode: String,
-            exportGraph: Bool = false,
-            graphType: String,
-            detectTearing: Bool = false,
-            userGraphScale: CGFloat,
-            renderOneSideOnly: Bool,
-            overlayPosition: String,
-            response250msEnabled: Bool,
-            graphColorHex: String,
-            onComplete: @escaping (String) -> Void = { _ in }
-            
-        ) -> String {
+        videoPath: String,
+        outputPath: String,
+        isMultithreading: Bool,
+        reportStats: Bool,
+        statsMode: String,
+        exportImage: Bool,
+        exportInteractive: Bool,
+        exportAnimated: Bool,
+        detectTearing: Bool = false,
+        userGraphScale: CGFloat,
+        renderOneSideOnly: Bool,
+        overlayPosition: String,
+        response250msEnabled: Bool,
+        graphColorHex: String,
+        mtChunkSize: Int,
+        codec: String,
+        onComplete: @escaping (String) -> Void = { _ in }
+        
+    ) -> String {
+        
+        
             let bucketSize = response250msEnabled ? 0.25 : 1.0
             let chosenNSColor: NSColor = {
                 let hex = graphColorHex.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
@@ -122,7 +127,7 @@ public struct FrameAnalyzer {
             }
             
             if isMultithreading {
-                let chunkSize = 1500
+                let chunkSize = mtChunkSize
                 let minFreeMemory: UInt64 = 5 * 1024 * 1024 * 1024 // 5 GB
                 log("🧠 Analyzing frame deltas in parallel...")
 
@@ -603,7 +608,7 @@ public struct FrameAnalyzer {
         }
         
         // Export graph
-            if exportGraph {
+        if (exportImage || exportAnimated || exportInteractive)  {
                 // Collect frametime graph data
                 let timeValues = frameTimes
                     .filter { $0.3 > 0 }
@@ -655,7 +660,7 @@ public struct FrameAnalyzer {
                 let outputHTMLPath = URL(fileURLWithPath: outputPath).appendingPathComponent("frametime_graph.html")
                 let imageOutputPath = URL(fileURLWithPath: outputPath).appendingPathComponent("frametime_graph.png")
                 
-                if graphType == "Interactive" {
+                if exportInteractive {
                     var htmlContent = """
                 <!DOCTYPE html>
                 <html>
@@ -717,7 +722,7 @@ public struct FrameAnalyzer {
                     }
                 }
                 
-                else if graphType == "Image" {
+                if exportImage {
                     // Image size: tall and high-res
                     let width = 6000
                     let height = 2000
@@ -909,7 +914,7 @@ public struct FrameAnalyzer {
                     }
                 }
                 // Video with overlay render
-                else if graphType == "Animated Overlay" {
+            if exportAnimated {
                     let outputVideoURL = URL(fileURLWithPath: outputPath).appendingPathComponent("frametime_overlay.mov")
                     if FileManager.default.fileExists(atPath: outputVideoURL.path) {
                         try? FileManager.default.removeItem(at: outputVideoURL)
@@ -939,24 +944,36 @@ public struct FrameAnalyzer {
                         return outputLog
                     }
                     
-                    // Encoding tweaks for stability/perf
-                    let compressionProps: [String: Any] = [
-                        AVVideoAverageBitRateKey: 12_000_000,
-                        AVVideoExpectedSourceFrameRateKey: Int(nominalFrameRate),
-                        AVVideoAllowFrameReorderingKey: false,
-                        AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
-                        AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC
-                    ]
-                    
-                    let videoSettings: [String: Any] = [
-                        AVVideoCodecKey: AVVideoCodecType.h264,
-                        AVVideoWidthKey: Int(imageSize.width),
-                        AVVideoHeightKey: Int(imageSize.height),
-                        AVVideoCompressionPropertiesKey: compressionProps
-                    ]
+
+                // Encoding tweaks for stability/perf (used only for H.264)
+                let compressionProps: [String: Any] = [
+                    AVVideoAverageBitRateKey: 12_000_000,
+                    AVVideoExpectedSourceFrameRateKey: Int(nominalFrameRate),
+                    AVVideoAllowFrameReorderingKey: false,
+                    AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+                    AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC
+                ]
+
+                // --- Codec selection by string ---
+                // If codec == "ProRes" → Apple ProRes 422, else H.264
+                let selectedCodec: AVVideoCodecType = (codec == "ProRes")
+                    ? AVVideoCodecType(rawValue: "apco")
+                    : .h264
+
+                var videoSettings: [String: Any] = [
+                    AVVideoCodecKey: selectedCodec,
+                    AVVideoWidthKey: Int(imageSize.width),
+                    AVVideoHeightKey: Int(imageSize.height)
+                ]
+
+                // Only H.264 uses the compression properties dictionary
+                if selectedCodec == .h264 {
+                    videoSettings[AVVideoCompressionPropertiesKey] = compressionProps
+                }
                     
                     let writerInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
                     writerInput.expectsMediaDataInRealTime = false
+                    writerInput.performsMultiPassEncodingIfSupported = false
                     
                     let sourceAttrs: [String: Any] = [
                         kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
@@ -1455,7 +1472,7 @@ public struct FrameAnalyzer {
             log("📁 Using video file: \(videoPath)")
             log("⚠️ WARNING: This is the early alpha version, it’s full of bugs and provides false positives if fed with video full of screen tearing!")
             
-            if !exportGraph || (graphType != "Animated Overlay") {
+            if !exportAnimated {
                 onComplete(outputLog)
                     return outputLog
                 }
@@ -1660,9 +1677,7 @@ public struct FrameAnalyzer {
             
             return Double(mse)
         }; return outputLog
-        if !exportGraph || !(graphType == "Interactive" || graphType == "Image" || graphType == "Animated Overlay") {
-            onComplete(outputLog)
-        }
+        
 
         
     }
