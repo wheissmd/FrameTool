@@ -1330,7 +1330,7 @@ struct SettingsPopup: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.gray.opacity(0.3)))
                 }
-                Text("v0.2.5-Alpha")
+                Text("v0.3.0-Alpha")
                     .font(.caption2)
                     .foregroundColor(.white)
 
