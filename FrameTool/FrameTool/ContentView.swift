@@ -823,7 +823,7 @@ struct SettingsPopup: View {
 
                 
                 if multithreadingEnabled {
-                    Text("⚠️ WARNING: Multithreading requires at least 16GB of RAM, otherwise it slows down the processing.")
+                    Text("⚠️ WARNING: Multithreading might slow down performance on machines with less than 16GB of RAM.")
                         .font(.caption)
                         .foregroundColor(
                             customThemeEnabled && themeType == "Hatsune Miku"

@@ -8,6 +8,9 @@ import CoreImage
 import Accelerate
 import AppKit
 import CoreText
+import Foundation
+import MachO
+
 extension vImage_Buffer {
     func deepCopy() -> vImage_Buffer {
         var newBuffer = vImage_Buffer()
@@ -104,184 +107,252 @@ public struct FrameAnalyzer {
             // List to store (frameIndex, timestamp, isChangeDetected, timeSinceLastChange)
             var frameTimes: [(Int, Double, Bool, Double)] = []
 
+            func getFreeMemoryBytes() -> UInt64 {
+                var stats = vm_statistics64()
+                var count = mach_msg_type_number_t(MemoryLayout.size(ofValue: stats) / MemoryLayout<integer_t>.size)
+                let result = withUnsafeMutablePointer(to: &stats) { statsPtr in
+                    statsPtr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                        host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+                    }
+                }
+                if result != KERN_SUCCESS { return 0 }
+                let free = UInt64(stats.free_count) * UInt64(vm_kernel_page_size)
+                let inactive = UInt64(stats.inactive_count) * UInt64(vm_kernel_page_size)
+                return free + inactive
+            }
+            
             if isMultithreading {
-                log("📦 Loading frames into memory...")
-                var frames: [vImage_Buffer] = []
-                var timestamps: [Double] = []
-                
-
-                while let sampleBuffer = readerOutput.copyNextSampleBuffer(),
-                      let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
-
-                    CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
-                    let width = CVPixelBufferGetWidth(imageBuffer)
-                    let height = CVPixelBufferGetHeight(imageBuffer)
-                    let baseAddress = CVPixelBufferGetBaseAddress(imageBuffer)
-                    let rowBytes = CVPixelBufferGetBytesPerRow(imageBuffer)
-
-                    var buffer = vImage_Buffer(data: baseAddress, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: rowBytes)
-
-                    var grayBuffer = vImage_Buffer()
-                    vImageBuffer_Init(&grayBuffer, buffer.height, buffer.width, 8, vImage_Flags(kvImageNoFlags))
-
-                    let matrix: [Int16] = [19, 183, 54, 0]
-                    let divisor: Int32 = 256
-                    let error = vImageMatrixMultiply_ARGB8888ToPlanar8(&buffer, &grayBuffer, matrix, divisor, nil, 0, vImage_Flags(kvImageNoFlags))
-
-                    frames.append(grayBuffer)
-                    let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-                    timestamps.append(CMTimeGetSeconds(pts))
-                    CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly)
-                }
-
+                let chunkSize = 1500
+                let minFreeMemory: UInt64 = 5 * 1024 * 1024 * 1024 // 5 GB
                 log("🧠 Analyzing frame deltas in parallel...")
-                let queue = DispatchQueue(label: "compareQueue", attributes: .concurrent)
-                let group = DispatchGroup()
-                var diffs = Array(repeating: 0.0, count: frames.count)
 
-                for i in 1..<frames.count {
-                    queue.async(group: group) {
-                        diffs[i] = mseVImage(frames[i], frames[i - 1])
+                var frameIndex = 0
+                var prevFrame: vImage_Buffer? = nil
+                var prevTimestamp: Double? = nil
+                var doneLoading = false
+
+                // Thread-safe chunk buffer
+                let chunkQueue = DispatchQueue(label: "chunk.queue", attributes: .concurrent)
+                var chunkBuffer: [([vImage_Buffer], [Double])] = []
+
+                func enqueueChunk(_ frames: [vImage_Buffer], _ timestamps: [Double]) {
+                    chunkQueue.async(flags: .barrier) {
+                        chunkBuffer.append((frames, timestamps))
                     }
                 }
-                group.wait()
 
+                func dequeueChunk() -> ([vImage_Buffer], [Double])? {
+                    var chunk: ([vImage_Buffer], [Double])?
+                    chunkQueue.sync {
+                        if !chunkBuffer.isEmpty {
+                            chunk = chunkBuffer.removeFirst()
+                        }
+                    }
+                    return chunk
+                }
 
-                var consecutiveTearing = 0
-                
-                let windowSize = 10
-                let changeWindowSize = 10
-                var frameDeltaWindow: [Double] = []
-                var frameSpikeWindow: [Bool]   = []
-                var recentDeltas:    [Double] = []
-                var recentSpikes:    [Bool]   = []
-                var lastChange = 0
+                // Producer: read and convert frames in background
+                let loaderQueue = DispatchQueue.global(qos: .userInitiated)
+                loaderQueue.async {
+                    while true {
+                        // Check available RAM before preparing next chunk
+                        while getFreeMemoryBytes() < minFreeMemory {
+                            Thread.sleep(forTimeInterval: 0.05) // wait 50ms before checking again
+                        }
 
+                        var frames: [vImage_Buffer] = []
+                        var timestamps: [Double] = []
 
-                for i in 0..<diffs.count {
-                    let time = timestamps[i]
-                    let diff = diffs[i]
-                    
-                    
-                    // 1 scene-change test
-                    let rawChange = diff > 1 && hasClusterDifference(frames[i], frames[i-1])
-                    var isSceneChange = rawChange
-                    print("DBG1: i=\(i) rawChange=\(rawChange)")
+                        // Keep last frame for continuity
+                        if let prev = prevFrame, let prevTs = prevTimestamp {
+                            frames.append(prev)
+                            timestamps.append(prevTs)
+                            prevFrame = nil
+                            prevTimestamp = nil
+                        }
 
-                    // Compute change-to-change delta
-                    let delta = time - timestamps[lastChange]
-                    print("DBG2: i=\(i) delta=\(delta) lastChange=\(lastChange)")
+                        var framesLoaded = 0
+                        while framesLoaded < chunkSize,
+                              let sampleBuffer = readerOutput.copyNextSampleBuffer(),
+                              let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
 
-                    // 3 Detect the lock (7 of 10 frames within ±1 ms)
-                    // To avoid encoding artifacts result in false positive outputs
-                    var lock: Double? = nil
-                    if recentDeltas.count == windowSize {
-                        for v in recentDeltas {
-                            let nearCount = recentDeltas.filter { abs($0 - v) <= 0.001 }.count
-                            if nearCount >= 7 {
-                                lock = v
-                                break
+                            CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
+                            let width = CVPixelBufferGetWidth(imageBuffer)
+                            let height = CVPixelBufferGetHeight(imageBuffer)
+                            let baseAddress = CVPixelBufferGetBaseAddress(imageBuffer)
+                            let rowBytes = CVPixelBufferGetBytesPerRow(imageBuffer)
+
+                            var buffer = vImage_Buffer(data: baseAddress,
+                                                       height: vImagePixelCount(height),
+                                                       width: vImagePixelCount(width),
+                                                       rowBytes: rowBytes)
+
+                            var grayBuffer = vImage_Buffer()
+                            vImageBuffer_Init(&grayBuffer, buffer.height, buffer.width, 8, vImage_Flags(kvImageNoFlags))
+
+                            let matrix: [Int16] = [19, 183, 54, 0]
+                            let divisor: Int32 = 256
+                            vImageMatrixMultiply_ARGB8888ToPlanar8(&buffer, &grayBuffer, matrix, divisor, nil, 0, vImage_Flags(kvImageNoFlags))
+
+                            frames.append(grayBuffer)
+                            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+                            timestamps.append(CMTimeGetSeconds(pts))
+                            CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly)
+
+                            framesLoaded += 1
+                        }
+
+                        if frames.isEmpty {
+                            doneLoading = true
+                            break
+                        }
+
+                        // Save last frame for continuity into the next chunk
+                        if let lastFrame = frames.last, let lastTs = timestamps.last {
+                            prevFrame = lastFrame
+                            prevTimestamp = lastTs
+                        }
+
+                        enqueueChunk(frames, timestamps)
+
+                        if frames.count < chunkSize {
+                            doneLoading = true
+                            break
+                        }
+                    }
+                }
+
+                // Consumer: process chunks until loader finishes and buffer is empty
+                while true {
+                    if let (frames, timestamps) = dequeueChunk() {
+                        if frames.count < 2 { continue }
+
+                        let queue = DispatchQueue.global(qos: .userInitiated)
+                        let group = DispatchGroup()
+                        var diffs = Array(repeating: 0.0, count: frames.count)
+
+                        for i in 1..<frames.count {
+                            group.enter()
+                            queue.async {
+                                diffs[i] = mseVImage(frames[i], frames[i - 1])
+                                group.leave()
                             }
                         }
-                    }
-                    print("DBG3: i=\(i) recentDeltas=\(recentDeltas)")
-                    print("DBG3: i=\(i) lock=\(lock ?? -1)")   // -1 means nil
+                        group.wait()
 
-                    // 4 Check ifor a genuine slow-frame spike before
-                    let sawSpikeBefore = recentSpikes.contains(true)
-                    print("DBG4: i=\(i) recentSpikes=\(recentSpikes) sawSpikeBefore=\(sawSpikeBefore)")
+                        // Detection logic
+                        var consecutiveTearing = 0
+                        let windowSize = 10
+                        var recentDeltas: [Double] = []
+                        var recentSpikes: [Bool] = []
+                        var lastChange = 0
 
-                    // 5 Veto sub-lock dip on a rawChange if a spike is not present
-                    // corresponds to behavior of FPS locks
-                    let epsilon = 0.001
-                    if rawChange, let L = lock, delta < L - epsilon, !sawSpikeBefore {
-                        isSceneChange = false
-                        print("VETO: delta \(delta) < lock - ε (\(L - epsilon))")
-                    }
+                        for i in 0..<diffs.count {
+                            let time = timestamps[i]
+                            let diff = diffs[i]
 
-                    // 6 Non-rawChanges become no-change and jump to final append
-                    if !rawChange {
-                        print("DBG6: i=\(i) skip non-rawChange")
-                        frameTimes.append((i, time, false, 0))
-                        continue
-                    }
+                            let rawChange = diff > 1 && hasClusterDifference(frames[i], frames[i - 1])
+                            var isSceneChange = rawChange
 
-                    // 7 At this point isSceneChange may have been vetoed, log it
-                    print("DBG7: i=\(i) isSceneChange=\(isSceneChange)")
+                            let delta = time - timestamps[lastChange]
 
-                    // 8 Update your post-veto history windows if it survived
-                    if isSceneChange {
-                        recentDeltas.append(delta)
-                        if recentDeltas.count > windowSize { recentDeltas.removeFirst() }
+                            var lock: Double? = nil
+                            if recentDeltas.count == windowSize {
+                                for v in recentDeltas {
+                                    let nearCount = recentDeltas.filter { abs($0 - v) <= 0.001 }.count
+                                    if nearCount >= 7 {
+                                        lock = v
+                                        break
+                                    }
+                                }
+                            }
 
-                        let didSpike = (lock != nil && delta > lock! + epsilon)
-                        recentSpikes.append(didSpike)
-                        if recentSpikes.count > windowSize { recentSpikes.removeFirst() }
+                            let sawSpikeBefore = recentSpikes.contains(true)
+                            let epsilon = 0.001
+                            if rawChange, let L = lock, delta < L - epsilon, !sawSpikeBefore {
+                                isSceneChange = false
+                            }
 
-                        // safe, non-crashing print:
-                        if let L = lock {
-                            print("SPIKE?: delta \(delta) > lock + ε (\(L + epsilon))? \(didSpike)")
-                        } else {
-                            print("SPIKE?: no lock → didSpike=\(didSpike)")
-                        }
-                    }
+                            if !rawChange {
+                                frameTimes.append((frameIndex + i, time, false, 0))
+                                continue
+                            }
 
-                    // Log change in frame
-                    if isSceneChange {
-                        print("⚠️ Change at frame \(i): diff = \(String(format: "%.3f", diff))")
-                    }
+                            if isSceneChange {
+                                recentDeltas.append(delta)
+                                if recentDeltas.count > windowSize { recentDeltas.removeFirst() }
 
-                    if detectTearing && i > 0 {
-                        let height = Int(frames[i].height)
-                        let width = Int(frames[i].width)
-                        let rowBytes = frames[i].rowBytes
-                        let sliceCount = 8
-                        let sliceHeight = height / sliceCount
+                                let didSpike = (lock != nil && delta > lock! + epsilon)
+                                recentSpikes.append(didSpike)
+                                if recentSpikes.count > windowSize { recentSpikes.removeFirst() }
+                            }
 
-                        var matchPrev = 0
+                            if detectTearing && i > 0 {
+                                let height = Int(frames[i].height)
+                                let width = Int(frames[i].width)
+                                let rowBytes = frames[i].rowBytes
+                                let sliceCount = 8
+                                let sliceHeight = height / sliceCount
 
-                        for s in 0..<sliceCount {
-                            let y = s * sliceHeight
-                            let offset = y * rowBytes
+                                var matchPrev = 0
+                                for s in 0..<sliceCount {
+                                    let y = s * sliceHeight
+                                    let offset = y * rowBytes
 
-                            let curr = vImage_Buffer(data: frames[i].data + offset,
-                                                     height: vImagePixelCount(sliceHeight),
-                                                     width: vImagePixelCount(width),
-                                                     rowBytes: rowBytes)
+                                    let curr = vImage_Buffer(data: frames[i].data + offset,
+                                                             height: vImagePixelCount(sliceHeight),
+                                                             width: vImagePixelCount(width),
+                                                             rowBytes: rowBytes)
 
-                            let prev = vImage_Buffer(data: frames[i - 1].data + offset,
-                                                     height: vImagePixelCount(sliceHeight),
-                                                     width: vImagePixelCount(width),
-                                                     rowBytes: rowBytes)
+                                    let prev = vImage_Buffer(data: frames[i - 1].data + offset,
+                                                             height: vImagePixelCount(sliceHeight),
+                                                             width: vImagePixelCount(width),
+                                                             rowBytes: rowBytes)
 
-                            let msePrev = mseVImage(curr, prev)
-                            if msePrev < 5.0 && !isRegionBlack(curr) {
-                                matchPrev += 1
+                                    let msePrev = mseVImage(curr, prev)
+                                    if msePrev < 5.0 && !isRegionBlack(curr) {
+                                        matchPrev += 1
+                                    }
+                                }
+                                if matchPrev > 0 && matchPrev < sliceCount {
+                                    consecutiveTearing += 1
+                                    isSceneChange = (consecutiveTearing % 2 == 0)
+                                } else {
+                                    consecutiveTearing = 0
+                                }
+                            }
+
+                            if isSceneChange {
+                                let delta = time - timestamps[lastChange]
+                                frameTimes.append((frameIndex + i, time, true, delta))
+                                lastChange = i
+                            } else {
+                                frameTimes.append((frameIndex + i, time, false, 0))
                             }
                         }
-                        if matchPrev > 0 && matchPrev < sliceCount {
-                            consecutiveTearing += 1
-                            isSceneChange = (consecutiveTearing % 2 == 0)
-                            print("Tearing detected at frame \(i): matchPrev=\(matchPrev), consecutive=\(consecutiveTearing)")
-                        } else {
-                            consecutiveTearing = 0
+
+                        // Free everything except last frame in chunk
+                        for i in 0..<(frames.count - 1) {
+                            free(frames[i].data)
                         }
 
-                    }
-                    
-
-                    
-                    if isSceneChange {
-                        let delta = time - timestamps[lastChange]
-                        frameTimes.append((i, time, true, delta))
-                        lastChange = i
+                        frameIndex += frames.count - 1
+                    } else if doneLoading {
+                        break
                     } else {
-                        frameTimes.append((i, time, false, 0))
+                        Thread.sleep(forTimeInterval: 0.001)
                     }
                 }
-                frames.forEach { free($0.data) }
 
-            } else {
+                // Final cleanup
+                if let oldPrev = prevFrame {
+                    free(oldPrev.data)
+                }
+                prevFrame = nil
+                prevTimestamp = nil
+            }
+
+ else {
                 log("🧠 Analyzing frame deltas sequentially...")
                 var prevBuffer: vImage_Buffer? = nil
                 var index = 0
@@ -1322,7 +1393,7 @@ public struct FrameAnalyzer {
             
             log("✅ Saved output to \(outputURL.path)")
             log("📁 Using video file: \(videoPath)")
-            log("⚠️ WARNING: This is the early prototype version, it’s full of bugs and provides false positives if fed with video full of screen tearing!")
+            log("⚠️ WARNING: This is the early alpha version, it’s full of bugs and provides false positives if fed with video full of screen tearing!")
             
             if !exportGraph || (graphType != "Animated Overlay") {
                 onComplete(outputLog)
