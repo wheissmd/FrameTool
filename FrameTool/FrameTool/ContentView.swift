@@ -613,7 +613,7 @@ struct SettingsPopup: View {
                     }
                 }
 
-                Text("v0.3.0-Alpha")
+                Text("v0.3.0.1-Alpha")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }

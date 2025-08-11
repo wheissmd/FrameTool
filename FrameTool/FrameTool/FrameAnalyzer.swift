@@ -159,10 +159,14 @@ public struct FrameAnalyzer {
                 // Producer: read and convert frames in background
                 let loaderQueue = DispatchQueue.global(qos: .userInitiated)
                 loaderQueue.async {
+                    
                     while true {
                         // Check available RAM before preparing next chunk
                         while getFreeMemoryBytes() < minFreeMemory {
-                            Thread.sleep(forTimeInterval: 0.05) // wait 50ms before checking again
+                            var queueHasItems = false
+                            chunkQueue.sync { queueHasItems = !chunkBuffer.isEmpty }
+                            if !queueHasItems { break }            // nothing queued → proceed despite low RAM
+                            Thread.sleep(forTimeInterval: 0.05)
                         }
 
                         var frames: [vImage_Buffer] = []
