@@ -5,10 +5,11 @@
 <table>
   <tr>
     <td>
-      <img width="400" alt="Screenshot 1" src="https://github.com/user-attachments/assets/bdb35542-93e7-44b7-8a74-ca0fc5045828" />
+      <img width="400" alt="Screenshot 1" src="https://github.com/user-attachments/assets/3bb3dfd1-37c7-4248-81de-e1d5597dbc9d" />
     </td>
     <td>
-      <img width="400" alt="Screenshot 2" src="https://github.com/user-attachments/assets/0cd110b8-1ae2-4056-b8e7-4f187264dd3e" />
+      <img width="400" alt="Screenshot 2" src="https://github.com/user-attachments/assets/68fd7cd5-4ebf-4f88-a4a6-d1bb122f0559" />
+" />
     </td>
   </tr>
 </table>
