@@ -10,8 +10,10 @@ import SwiftUI
 @main
 struct FrameToolApp: App {
     var body: some Scene {
-        WindowGroup {
+        Window("Frame Tool", id: "main") {
             ContentView()
+                .frame(width: 900, height: 780)
         }
+        .windowResizability(.contentSize)
     }
 }

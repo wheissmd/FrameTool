@@ -8,6 +8,9 @@ import CoreImage
 import Accelerate
 import AppKit
 import CoreText
+import Foundation
+import MachO
+
 extension vImage_Buffer {
     func deepCopy() -> vImage_Buffer {
         var newBuffer = vImage_Buffer()
@@ -35,20 +38,45 @@ public struct FrameAnalyzer {
     
     
     public static func runAnalysis(
-            videoPath: String,
-            outputPath: String,
-            isMultithreading: Bool,
-            reportStats: Bool,
-            statsMode: String,
-            exportGraph: Bool = false,
-            graphType: String,
-            detectTearing: Bool = false,
-            userGraphScale: CGFloat,
-            renderOneSideOnly: Bool,
-            overlayPosition: String,
-            onComplete: @escaping (String) -> Void = { _ in }
-            
-        ) -> String {
+        videoPath: String,
+        outputPath: String,
+        isMultithreading: Bool,
+        reportStats: Bool,
+        statsMode: String,
+        exportImage: Bool,
+        exportInteractive: Bool,
+        exportAnimated: Bool,
+        detectTearing: Bool = false,
+        userGraphScale: CGFloat,
+        renderOneSideOnly: Bool,
+        overlayPosition: String,
+        response250msEnabled: Bool,
+        graphColorHex: String,
+        mtChunkSize: Int,
+        codec: String,
+        onComplete: @escaping (String) -> Void = { _ in }
+        
+    ) -> String {
+        
+        
+            let bucketSize = response250msEnabled ? 0.25 : 1.0
+            let chosenNSColor: NSColor = {
+                let hex = graphColorHex.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "#", with: "")
+                guard let v = UInt32(hex.count == 6 ? hex + "FF" : hex, radix: 16) else { return .green }
+                let r = CGFloat((v >> 24) & 0xFF) / 255
+                let g = CGFloat((v >> 16) & 0xFF) / 255
+                let b = CGFloat((v >>  8) & 0xFF) / 255
+                let a = CGFloat((v >>  0) & 0xFF) / 255
+                return NSColor(srgbRed: r, green: g, blue: b, alpha: a)
+            }()
+            let chosenCGColor = chosenNSColor.cgColor
+            let cssHexNoAlpha: String = {
+                guard let rgb = chosenNSColor.usingColorSpace(.sRGB) else { return "#00AA00" }
+                let r = Int(round(rgb.redComponent   * 255))
+                let g = Int(round(rgb.greenComponent * 255))
+                let b = Int(round(rgb.blueComponent  * 255))
+                return String(format: "#%02X%02X%02X", r, g, b)
+            }()
             var outputLog = ""
             func log(_ msg: String) {
                 outputLog += msg + "\n"
@@ -84,183 +112,249 @@ public struct FrameAnalyzer {
             // List to store (frameIndex, timestamp, isChangeDetected, timeSinceLastChange)
             var frameTimes: [(Int, Double, Bool, Double)] = []
 
+            func getFreeMemoryBytes() -> UInt64 {
+                var stats = vm_statistics64()
+                var count = mach_msg_type_number_t(MemoryLayout.size(ofValue: stats) / MemoryLayout<integer_t>.size)
+                let result = withUnsafeMutablePointer(to: &stats) { statsPtr in
+                    statsPtr.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                        host_statistics64(mach_host_self(), HOST_VM_INFO64, $0, &count)
+                    }
+                }
+                if result != KERN_SUCCESS { return 0 }
+                let free = UInt64(stats.free_count) * UInt64(vm_kernel_page_size)
+                let inactive = UInt64(stats.inactive_count) * UInt64(vm_kernel_page_size)
+                return free + inactive
+            }
+            
             if isMultithreading {
-                log("📦 Loading frames into memory...")
-                var frames: [vImage_Buffer] = []
-                var timestamps: [Double] = []
-                
-
-                while let sampleBuffer = readerOutput.copyNextSampleBuffer(),
-                      let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
-
-                    CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
-                    let width = CVPixelBufferGetWidth(imageBuffer)
-                    let height = CVPixelBufferGetHeight(imageBuffer)
-                    let baseAddress = CVPixelBufferGetBaseAddress(imageBuffer)
-                    let rowBytes = CVPixelBufferGetBytesPerRow(imageBuffer)
-
-                    var buffer = vImage_Buffer(data: baseAddress, height: vImagePixelCount(height), width: vImagePixelCount(width), rowBytes: rowBytes)
-
-                    var grayBuffer = vImage_Buffer()
-                    vImageBuffer_Init(&grayBuffer, buffer.height, buffer.width, 8, vImage_Flags(kvImageNoFlags))
-
-                    let matrix: [Int16] = [19, 183, 54, 0]
-                    let divisor: Int32 = 256
-                    let error = vImageMatrixMultiply_ARGB8888ToPlanar8(&buffer, &grayBuffer, matrix, divisor, nil, 0, vImage_Flags(kvImageNoFlags))
-
-                    frames.append(grayBuffer)
-                    let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-                    timestamps.append(CMTimeGetSeconds(pts))
-                    CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly)
-                }
-
+                let chunkSize = mtChunkSize
+                let minFreeMemory: UInt64 = 5 * 1024 * 1024 * 1024 // 5 GB
                 log("🧠 Analyzing frame deltas in parallel...")
-                let queue = DispatchQueue(label: "compareQueue", attributes: .concurrent)
-                let group = DispatchGroup()
-                var diffs = Array(repeating: 0.0, count: frames.count)
 
-                for i in 1..<frames.count {
-                    queue.async(group: group) {
-                        diffs[i] = mseVImage(frames[i], frames[i - 1])
+                var frameIndex = 0
+                var prevFrame: vImage_Buffer? = nil
+                var prevTimestamp: Double? = nil
+                var doneLoading = false
+
+                // Thread-safe chunk buffer
+                let chunkQueue = DispatchQueue(label: "chunk.queue", attributes: .concurrent)
+                var chunkBuffer: [([vImage_Buffer], [Double])] = []
+
+                func enqueueChunk(_ frames: [vImage_Buffer], _ timestamps: [Double]) {
+                    chunkQueue.async(flags: .barrier) {
+                        chunkBuffer.append((frames, timestamps))
                     }
                 }
-                group.wait()
 
+                func dequeueChunk() -> ([vImage_Buffer], [Double])? {
+                    var chunk: ([vImage_Buffer], [Double])?
+                    chunkQueue.sync {
+                        if !chunkBuffer.isEmpty {
+                            chunk = chunkBuffer.removeFirst()
+                        }
+                    }
+                    return chunk
+                }
 
-                var consecutiveTearing = 0
-                
-                let windowSize = 10
-                let changeWindowSize = 10
-                var frameDeltaWindow: [Double] = []
-                var frameSpikeWindow: [Bool]   = []
-                var recentDeltas:    [Double] = []
-                var recentSpikes:    [Bool]   = []
-                var lastChange = 0
+                // Producer: read and convert frames in background
+                let loaderQueue = DispatchQueue.global(qos: .userInitiated)
+                loaderQueue.async {
+                    while true {
+                        // Check available RAM before preparing next chunk
+                        while getFreeMemoryBytes() < minFreeMemory {
+                            Thread.sleep(forTimeInterval: 0.05) // wait 50ms before checking again
+                        }
 
+                        var frames: [vImage_Buffer] = []
+                        var timestamps: [Double] = []
 
-                for i in 0..<diffs.count {
-                    let time = timestamps[i]
-                    let diff = diffs[i]
-                    
-                    
-                    // 1 scene-change test
-                    let rawChange = diff > 1 && hasClusterDifference(frames[i], frames[i-1])
-                    var isSceneChange = rawChange
-                    print("DBG1: i=\(i) rawChange=\(rawChange)")
+                        // Keep last frame for continuity
+                        if let prev = prevFrame, let prevTs = prevTimestamp {
+                            frames.append(prev)
+                            timestamps.append(prevTs)
+                            prevFrame = nil
+                            prevTimestamp = nil
+                        }
 
-                    // Compute change-to-change delta
-                    let delta = time - timestamps[lastChange]
-                    print("DBG2: i=\(i) delta=\(delta) lastChange=\(lastChange)")
+                        var framesLoaded = 0
+                        while framesLoaded < chunkSize,
+                              let sampleBuffer = readerOutput.copyNextSampleBuffer(),
+                              let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) {
 
-                    // 3 Detect the lock (7 of 10 frames within ±1 ms)
-                    // To avoid encoding artifacts result in false positive outputs
-                    var lock: Double? = nil
-                    if recentDeltas.count == windowSize {
-                        for v in recentDeltas {
-                            let nearCount = recentDeltas.filter { abs($0 - v) <= 0.001 }.count
-                            if nearCount >= 7 {
-                                lock = v
-                                break
+                            CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
+                            let width = CVPixelBufferGetWidth(imageBuffer)
+                            let height = CVPixelBufferGetHeight(imageBuffer)
+                            let baseAddress = CVPixelBufferGetBaseAddress(imageBuffer)
+                            let rowBytes = CVPixelBufferGetBytesPerRow(imageBuffer)
+
+                            var buffer = vImage_Buffer(data: baseAddress,
+                                                       height: vImagePixelCount(height),
+                                                       width: vImagePixelCount(width),
+                                                       rowBytes: rowBytes)
+
+                            var grayBuffer = vImage_Buffer()
+                            vImageBuffer_Init(&grayBuffer, buffer.height, buffer.width, 8, vImage_Flags(kvImageNoFlags))
+
+                            let matrix: [Int16] = [19, 183, 54, 0]
+                            let divisor: Int32 = 256
+                            vImageMatrixMultiply_ARGB8888ToPlanar8(&buffer, &grayBuffer, matrix, divisor, nil, 0, vImage_Flags(kvImageNoFlags))
+
+                            frames.append(grayBuffer)
+                            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+                            timestamps.append(CMTimeGetSeconds(pts))
+                            CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly)
+
+                            framesLoaded += 1
+                        }
+
+                        if frames.isEmpty {
+                            doneLoading = true
+                            break
+                        }
+
+                        // Save last frame for continuity into the next chunk
+                        if let lastFrame = frames.last, let lastTs = timestamps.last {
+                            prevFrame = lastFrame
+                            prevTimestamp = lastTs
+                        }
+
+                        enqueueChunk(frames, timestamps)
+
+                        if frames.count < chunkSize {
+                            doneLoading = true
+                            break
+                        }
+                    }
+                }
+
+                // Consumer: process chunks until loader finishes and buffer is empty
+                while true {
+                    if let (frames, timestamps) = dequeueChunk() {
+                        if frames.count < 2 { continue }
+
+                        let queue = DispatchQueue.global(qos: .userInitiated)
+                        let group = DispatchGroup()
+                        var diffs = Array(repeating: 0.0, count: frames.count)
+
+                        for i in 1..<frames.count {
+                            group.enter()
+                            queue.async {
+                                diffs[i] = mseVImage(frames[i], frames[i - 1])
+                                group.leave()
                             }
                         }
-                    }
-                    print("DBG3: i=\(i) recentDeltas=\(recentDeltas)")
-                    print("DBG3: i=\(i) lock=\(lock ?? -1)")   // -1 means nil
+                        group.wait()
 
-                    // 4 Check ifor a genuine slow-frame spike before
-                    let sawSpikeBefore = recentSpikes.contains(true)
-                    print("DBG4: i=\(i) recentSpikes=\(recentSpikes) sawSpikeBefore=\(sawSpikeBefore)")
+                        // Detection logic
+                        var consecutiveTearing = 0
+                        let windowSize = 10
+                        var recentDeltas: [Double] = []
+                        var recentSpikes: [Bool] = []
+                        var lastChange = 0
 
-                    // 5 Veto sub-lock dip on a rawChange if a spike is not present
-                    // corresponds to behavior of FPS locks
-                    let epsilon = 0.001
-                    if rawChange, let L = lock, delta < L - epsilon, !sawSpikeBefore {
-                        isSceneChange = false
-                        print("VETO: delta \(delta) < lock - ε (\(L - epsilon))")
-                    }
+                        for i in 0..<diffs.count {
+                            let time = timestamps[i]
+                            let diff = diffs[i]
 
-                    // 6 Non-rawChanges become no-change and jump to final append
-                    if !rawChange {
-                        print("DBG6: i=\(i) skip non-rawChange")
-                        frameTimes.append((i, time, false, 0))
-                        continue
-                    }
+                            let rawChange = diff > 1 && hasClusterDifference(frames[i], frames[i - 1])
+                            var isSceneChange = rawChange
 
-                    // 7 At this point isSceneChange may have been vetoed, log it
-                    print("DBG7: i=\(i) isSceneChange=\(isSceneChange)")
+                            let delta = time - timestamps[lastChange]
 
-                    // 8 Update your post-veto history windows if it survived
-                    if isSceneChange {
-                        recentDeltas.append(delta)
-                        if recentDeltas.count > windowSize { recentDeltas.removeFirst() }
+                            var lock: Double? = nil
+                            if recentDeltas.count == windowSize {
+                                for v in recentDeltas {
+                                    let nearCount = recentDeltas.filter { abs($0 - v) <= 0.001 }.count
+                                    if nearCount >= 7 {
+                                        lock = v
+                                        break
+                                    }
+                                }
+                            }
 
-                        let didSpike = (lock != nil && delta > lock! + epsilon)
-                        recentSpikes.append(didSpike)
-                        if recentSpikes.count > windowSize { recentSpikes.removeFirst() }
+                            let sawSpikeBefore = recentSpikes.contains(true)
+                            let epsilon = 0.001
+                            if rawChange, let L = lock, delta < L - epsilon, !sawSpikeBefore {
+                                isSceneChange = false
+                            }
 
-                        // safe, non-crashing print:
-                        if let L = lock {
-                            print("SPIKE?: delta \(delta) > lock + ε (\(L + epsilon))? \(didSpike)")
-                        } else {
-                            print("SPIKE?: no lock → didSpike=\(didSpike)")
-                        }
-                    }
+                            if !rawChange {
+                                frameTimes.append((frameIndex + i, time, false, 0))
+                                continue
+                            }
 
-                    // Log change in frame
-                    if isSceneChange {
-                        print("⚠️ Change at frame \(i): diff = \(String(format: "%.3f", diff))")
-                    }
+                            if isSceneChange {
+                                recentDeltas.append(delta)
+                                if recentDeltas.count > windowSize { recentDeltas.removeFirst() }
 
-                    if detectTearing && i > 0 {
-                        let height = Int(frames[i].height)
-                        let width = Int(frames[i].width)
-                        let rowBytes = frames[i].rowBytes
-                        let sliceCount = 8
-                        let sliceHeight = height / sliceCount
+                                let didSpike = (lock != nil && delta > lock! + epsilon)
+                                recentSpikes.append(didSpike)
+                                if recentSpikes.count > windowSize { recentSpikes.removeFirst() }
+                            }
 
-                        var matchPrev = 0
+                            if detectTearing && i > 0 {
+                                let height = Int(frames[i].height)
+                                let width = Int(frames[i].width)
+                                let rowBytes = frames[i].rowBytes
+                                let sliceCount = 8
+                                let sliceHeight = height / sliceCount
 
-                        for s in 0..<sliceCount {
-                            let y = s * sliceHeight
-                            let offset = y * rowBytes
+                                var matchPrev = 0
+                                for s in 0..<sliceCount {
+                                    let y = s * sliceHeight
+                                    let offset = y * rowBytes
 
-                            let curr = vImage_Buffer(data: frames[i].data + offset,
-                                                     height: vImagePixelCount(sliceHeight),
-                                                     width: vImagePixelCount(width),
-                                                     rowBytes: rowBytes)
+                                    let curr = vImage_Buffer(data: frames[i].data + offset,
+                                                             height: vImagePixelCount(sliceHeight),
+                                                             width: vImagePixelCount(width),
+                                                             rowBytes: rowBytes)
 
-                            let prev = vImage_Buffer(data: frames[i - 1].data + offset,
-                                                     height: vImagePixelCount(sliceHeight),
-                                                     width: vImagePixelCount(width),
-                                                     rowBytes: rowBytes)
+                                    let prev = vImage_Buffer(data: frames[i - 1].data + offset,
+                                                             height: vImagePixelCount(sliceHeight),
+                                                             width: vImagePixelCount(width),
+                                                             rowBytes: rowBytes)
 
-                            let msePrev = mseVImage(curr, prev)
-                            if msePrev < 5.0 && !isRegionBlack(curr) {
-                                matchPrev += 1
+                                    let msePrev = mseVImage(curr, prev)
+                                    if msePrev < 5.0 && !isRegionBlack(curr) {
+                                        matchPrev += 1
+                                    }
+                                }
+                                if matchPrev > 0 && matchPrev < sliceCount {
+                                    consecutiveTearing += 1
+                                    isSceneChange = (consecutiveTearing % 2 == 0)
+                                } else {
+                                    consecutiveTearing = 0
+                                }
+                            }
+
+                            if isSceneChange {
+                                let delta = time - timestamps[lastChange]
+                                frameTimes.append((frameIndex + i, time, true, delta))
+                                lastChange = i
+                            } else {
+                                frameTimes.append((frameIndex + i, time, false, 0))
                             }
                         }
-                        if matchPrev > 0 && matchPrev < sliceCount {
-                            consecutiveTearing += 1
-                            isSceneChange = (consecutiveTearing % 2 == 0)
-                            print("Tearing detected at frame \(i): matchPrev=\(matchPrev), consecutive=\(consecutiveTearing)")
-                        } else {
-                            consecutiveTearing = 0
+
+                        // Free everything except last frame in chunk
+                        for i in 0..<(frames.count - 1) {
+                            free(frames[i].data)
                         }
 
-                    }
-                    
-
-                    
-                    if isSceneChange {
-                        let delta = time - timestamps[lastChange]
-                        frameTimes.append((i, time, true, delta))
-                        lastChange = i
+                        frameIndex += frames.count - 1
+                    } else if doneLoading {
+                        break
                     } else {
-                        frameTimes.append((i, time, false, 0))
+                        Thread.sleep(forTimeInterval: 0.001)
                     }
                 }
-                frames.forEach { free($0.data) }
 
+                // Final cleanup
+                if let oldPrev = prevFrame {
+                    free(oldPrev.data)
+                }
+                prevFrame = nil
+                prevTimestamp = nil
             } else {
                 log("🧠 Analyzing frame deltas sequentially...")
                 var prevBuffer: vImage_Buffer? = nil
@@ -434,7 +528,7 @@ public struct FrameAnalyzer {
             }
         
             
-            func generateFPSBuckets(from frameDeltaValues: [(Double, Double)], step: Double = 0.25) -> [(time: Double, fps: Double)] {
+            func generateFPSBuckets(from frameDeltaValues: [(Double, Double)], step: Double) -> [(time: Double, fps: Double)] {
                 var fpsBuckets: [(Double, Double)] = []
                 guard let maxTime = frameDeltaValues.map(\.0).max() else { return fpsBuckets }
                 
@@ -464,7 +558,10 @@ public struct FrameAnalyzer {
         // Calculate min and max FPS from fps bucket
         let validTimes = frameTimes.compactMap { $0.3 > 0 ? $0.3 : nil }
         let fpsList = validTimes.map { 1.0 / $0 }
-        var fpsBuckets = generateFPSBuckets(from: frameTimes.filter { $0.2 && $0.3 > 0 }.map { ($0.1, $0.3) })
+            var fpsBuckets = generateFPSBuckets(
+                from: frameTimes.filter { $0.2 && $0.3 > 0 }.map { ($0.1, $0.3) },
+                step: bucketSize
+            )
         if fpsBuckets.count > 1 {
                 fpsBuckets.removeLast()
         }
@@ -511,7 +608,7 @@ public struct FrameAnalyzer {
         }
         
         // Export graph
-            if exportGraph {
+        if (exportImage || exportAnimated || exportInteractive)  {
                 // Collect frametime graph data
                 let timeValues = frameTimes
                     .filter { $0.3 > 0 }
@@ -525,7 +622,13 @@ public struct FrameAnalyzer {
                 var fpsDict = [Double: [Double]]()
                 
                 for (_, timestamp, isChange, delta) in frameTimes where isChange && delta > 0.0 {
-                    let bucket = Double(Int(timestamp / 0.25)) * 0.25
+                    let bucket: Double
+                    if response250msEnabled {
+                        bucket = Double(Int(timestamp / 0.25)) * 0.25
+                    } else {
+                        bucket = floor(timestamp) // 1-second buckets
+                    }
+
                     fpsDict[bucket, default: []].append(timestamp)
                 }
                 
@@ -557,7 +660,7 @@ public struct FrameAnalyzer {
                 let outputHTMLPath = URL(fileURLWithPath: outputPath).appendingPathComponent("frametime_graph.html")
                 let imageOutputPath = URL(fileURLWithPath: outputPath).appendingPathComponent("frametime_graph.png")
                 
-                if graphType == "Interactive" {
+                if exportInteractive {
                     var htmlContent = """
                 <!DOCTYPE html>
                 <html>
@@ -575,7 +678,7 @@ public struct FrameAnalyzer {
                             mode: 'lines',
                             type: 'scatter',
                             name: 'Frametime (ms)',
-                            line: { color: 'green' }
+                            line: { color: '\(cssHexNoAlpha)' }
                         };
                         var layout1 = {
                             title: 'Frametime',
@@ -595,7 +698,7 @@ public struct FrameAnalyzer {
                             mode: 'lines+markers',
                             type: 'scatter',
                             name: 'FPS',
-                            line: { color: 'darkgreen' }
+                            line: { color: '\(cssHexNoAlpha)' }
                         };
                         var layout2 = {
                             title: 'Frames Per Second',
@@ -619,7 +722,7 @@ public struct FrameAnalyzer {
                     }
                 }
                 
-                else if graphType == "Image" {
+                if exportImage {
                     // Image size: tall and high-res
                     let width = 6000
                     let height = 2000
@@ -627,8 +730,8 @@ public struct FrameAnalyzer {
                     let graphHeight = (height - Int(margin) * 3) / 2
                     
                     let colorBg = NSColor.black
-                    let colorLine1 = NSColor.green
-                    let colorLine2 = NSColor.systemGreen
+                    let colorLine1 = chosenNSColor
+                    let colorLine2 = chosenNSColor
                     let colorText = NSColor.white
                     
                     let image = NSImage(size: NSSize(width: width, height: height))
@@ -811,7 +914,7 @@ public struct FrameAnalyzer {
                     }
                 }
                 // Video with overlay render
-                else if graphType == "Animated Overlay" {
+            if exportAnimated {
                     let outputVideoURL = URL(fileURLWithPath: outputPath).appendingPathComponent("frametime_overlay.mov")
                     if FileManager.default.fileExists(atPath: outputVideoURL.path) {
                         try? FileManager.default.removeItem(at: outputVideoURL)
@@ -827,7 +930,7 @@ public struct FrameAnalyzer {
                     let nominalFrameRate = readerTrack.nominalFrameRate
                     let durationSeconds = asset.duration.seconds
                     // trim off the last 0.25 s so that the last bucket (potentially wrong) is not displayed
-                    let trimmedDuration = max(0, durationSeconds - 0.25)
+                    let trimmedDuration = max(0, durationSeconds - bucketSize)
                     let totalFramesToWrite = Int(trimmedDuration * Double(nominalFrameRate))
                     let imageSize = CGSize(width: Int(renderSize.width), height: Int(renderSize.height))
                     let scaleBase: CGFloat = 1260.0
@@ -841,18 +944,45 @@ public struct FrameAnalyzer {
                         return outputLog
                     }
                     
-                    let videoSettings: [String: Any] = [
-                        AVVideoCodecKey: AVVideoCodecType.h264,
-                        AVVideoWidthKey: Int(imageSize.width),
-                        AVVideoHeightKey: Int(imageSize.height)
-                    ]
+
+                // Encoding tweaks for stability/perf (used only for H.264)
+                let compressionProps: [String: Any] = [
+                    AVVideoAverageBitRateKey: 12_000_000,
+                    AVVideoExpectedSourceFrameRateKey: Int(nominalFrameRate),
+                    AVVideoAllowFrameReorderingKey: false,
+                    AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+                    AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC
+                ]
+
+                // Codec selection by string
+                let selectedCodec: AVVideoCodecType = (codec == "ProRes")
+                    ? AVVideoCodecType(rawValue: "apco")
+                    : .h264
+
+                var videoSettings: [String: Any] = [
+                    AVVideoCodecKey: selectedCodec,
+                    AVVideoWidthKey: Int(imageSize.width),
+                    AVVideoHeightKey: Int(imageSize.height)
+                ]
+
+                // Only H.264 uses the compression properties dictionary
+                if selectedCodec == .h264 {
+                    videoSettings[AVVideoCompressionPropertiesKey] = compressionProps
+                }
                     
                     let writerInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
-                    let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: writerInput, sourcePixelBufferAttributes: [
+                    writerInput.expectsMediaDataInRealTime = false
+                    writerInput.performsMultiPassEncodingIfSupported = false
+                    
+                    let sourceAttrs: [String: Any] = [
                         kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
                         kCVPixelBufferWidthKey as String: Int(imageSize.width),
-                        kCVPixelBufferHeightKey as String: Int(imageSize.height)
-                    ])
+                        kCVPixelBufferHeightKey as String: Int(imageSize.height),
+                        kCVPixelBufferIOSurfacePropertiesKey as String: [:]
+                    ]
+                    
+                    let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: writerInput,
+                                                                       sourcePixelBufferAttributes: sourceAttrs)
                     writer.add(writerInput)
                     
                     let overlayAsset = AVAsset(url: URL(fileURLWithPath: videoPath))
@@ -872,8 +1002,98 @@ public struct FrameAnalyzer {
                         .filter { $0.2 && $0.3 > 0 }
                         .map { ($0.1, $0.3) }
                     
-                    let metalDevice = MTLCreateSystemDefaultDevice()!
-                    let ciContext = CIContext(mtlDevice: metalDevice)
+                    // ======= Precompute arrays and buckets to avoid per-frame rescans =======
+                    let timestamps: [Double] = frameDeltaValues.map { $0.0 }
+                    let deltas: [Double]     = frameDeltaValues.map { $0.1 }
+                    
+                    let bucketCount = max(1, Int(ceil(trimmedDuration / bucketSize)) + 1)
+                    struct Bucket { var count: Int = 0; var first: Double = .infinity; var last: Double = -.infinity }
+                    var buckets = Array(repeating: Bucket(), count: bucketCount)
+                    for t in timestamps {
+                        let b = min(bucketCount - 1, max(0, Int(t / bucketSize)))
+                        buckets[b].count += 1
+                        if t < buckets[b].first { buckets[b].first = t }
+                        if t > buckets[b].last  { buckets[b].last  = t }
+                    }
+                    @inline(__always)
+                    func fpsForBucket(_ b: Int) -> Double {
+                        let bk = buckets[b]
+                        if bk.count >= 2 {
+                            let duration = bk.last - bk.first
+                            return duration > 0 ? Double(bk.count - 1) / duration : Double(bk.count)
+                        } else {
+                            return Double(bk.count)
+                        }
+                    }
+                    
+                    // Sliding window indices for visible frametime points
+                    var leftFT = 0
+                    var rightFT = 0
+                    
+                    // ======= Cache drawing resources that don't change each frame =======
+                    let colorSpace = CGColorSpaceCreateDeviceRGB()
+                    let lineColor = chosenCGColor
+                    let whiteCG = NSColor.white.cgColor
+                    let blackNS = NSColor.black
+                    
+                    // Set up fonts and prebuilt CTLines for static labels
+                    let fontFPSBoxSize: CGFloat = 58 * scaleFactor
+                    let fontAxisLabelSize: CGFloat = 60 * scaleFactor
+                    let fontFTTickSize: CGFloat = 22 * scaleFactor
+                    let fontFPSTickSize: CGFloat = 25 * scaleFactor
+                    
+                    let fontMenloBoldFPSBox = CTFontCreateWithName("Menlo-Bold" as CFString, fontFPSBoxSize, nil)
+                    let fontMenloBoldLabels = CTFontCreateWithName("Menlo-Bold" as CFString, fontAxisLabelSize, nil)
+                    let fontMenloFTTicks    = CTFontCreateWithName("Menlo" as CFString, fontFTTickSize, nil)
+                    let fontMenloFPSTicks   = CTFontCreateWithName("Menlo" as CFString, fontFPSTickSize, nil)
+                    
+                    let frametimeAttrStatic: [NSAttributedString.Key: Any] = [
+                        .font: fontMenloBoldLabels,
+                        .foregroundColor: NSColor.white,
+                        .strokeColor: blackNS,
+                        .strokeWidth: -2.0
+                    ]
+                    let fpsGraphAttrStatic: [NSAttributedString.Key: Any] = [
+                        .font: fontMenloBoldLabels,
+                        .foregroundColor: NSColor.white,
+                        .strokeColor: blackNS,
+                        .strokeWidth: -2.0
+                    ]
+                    let frametimeLabelLine = CTLineCreateWithAttributedString(NSAttributedString(string: "Frametime", attributes: frametimeAttrStatic))
+                    let fpsGraphLabelLine  = CTLineCreateWithAttributedString(NSAttributedString(string: "FPS", attributes: fpsGraphAttrStatic))
+                    
+                    // Precompute static layout pieces
+                    let fullGraphWidth = imageSize.width
+                    let halfGraphWidth = imageSize.width / 2
+                    
+                    // Determine visible overlay region based on setting
+                    let (graphAreaX, graphAreaWidth): (CGFloat, CGFloat) = {
+                        if renderOneSideOnly {
+                            switch overlayPosition {
+                            case "Left":
+                                return (0, halfGraphWidth)
+                            case "Middle":
+                                return (fullGraphWidth / 4, halfGraphWidth)
+                            case "Right":
+                                return (fullGraphWidth / 2, halfGraphWidth)
+                            default:
+                                return (0, halfGraphWidth)
+                            }
+                        } else {
+                            return (0, fullGraphWidth)
+                        }
+                    }()
+                    
+                    let graphPadding: CGFloat = 60 * scaleFactor
+                    let graphWidth = graphAreaWidth - 2 * graphPadding
+                    let graphHeight = (imageSize.height / 6) * 0.65
+                    let offsetX = graphAreaX + graphPadding  // shift graph drawing into the restricted region
+                    let offsetY: CGFloat = 80 * scaleFactor  // spacing from bottom
+                    
+                    let ftGraphY = offsetY + graphHeight + 80 * scaleFactor
+                    let fpsGraphY = offsetY
+                    
+                    let xScale = graphWidth / CGFloat(windowDuration)
                     
                     writer.startWriting()
                     writer.startSession(atSourceTime: .zero)
@@ -888,8 +1108,15 @@ public struct FrameAnalyzer {
                                 let windowStart = max(0, currentTime - windowDuration)
                                 let windowEnd = currentTime
                                 
-                                let visiblePoints = frameDeltaValues.filter { $0.0 >= windowStart && $0.0 <= windowEnd }
-                                if visiblePoints.isEmpty {
+                                // Advance sliding window indices without scanning the whole array
+                                while leftFT < timestamps.count && timestamps[leftFT] < windowStart { leftFT += 1 }
+                                while rightFT < timestamps.count && timestamps[rightFT] <= currentTime { rightFT += 1 }
+                                
+                                // Visible range is [leftFT ..< rightFT)
+                                let visCount = max(0, rightFT - leftFT)
+                                
+                                if visCount == 0 {
+                                    // No visible data for this frame; still advance to keep encoder pacing
                                     frameCount += 1
                                     return
                                 }
@@ -902,17 +1129,14 @@ public struct FrameAnalyzer {
                                         writer.finishWriting {
                                             onComplete(outputLog)
                                         }
-                                        return
-                                    }
-                                    
-                                    if overlayReader.status == .completed || overlayReader.status == .reading {
+                                    } else if overlayReader.status == .failed {
+                                        log("❌ OverlayReader error: \(overlayReader.error?.localizedDescription ?? "Unknown error")")
+                                        onComplete(outputLog)
+                                    } else {
                                         writerInput.markAsFinished()
                                         writer.finishWriting {
                                             onComplete(outputLog)
                                         }
-                                    } else {
-                                        log("❌ OverlayReader error: \(overlayReader.error?.localizedDescription ?? "Unknown error")")
-                                        onComplete(outputLog)
                                     }
                                     return
                                 }
@@ -925,79 +1149,59 @@ public struct FrameAnalyzer {
                                     return
                                 }
                                 
+                                // Directly copy the base frame into our destination buffer (avoid CI/CGImage creation)
+                                CVPixelBufferLockBaseAddress(imageBuffer, .readOnly)
                                 CVPixelBufferLockBaseAddress(buffer, [])
-                                let baseAddress = CVPixelBufferGetBaseAddress(buffer)
-                                let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
-                                let colorSpace = CGColorSpaceCreateDeviceRGB()
                                 
+                                let srcBase = CVPixelBufferGetBaseAddress(imageBuffer)!
+                                let dstBase = CVPixelBufferGetBaseAddress(buffer)!
+                                let srcBPR  = CVPixelBufferGetBytesPerRow(imageBuffer)
+                                let dstBPR  = CVPixelBufferGetBytesPerRow(buffer)
+                                let h       = CVPixelBufferGetHeight(buffer)
+                                let rowBytes = min(srcBPR, dstBPR)
+                                
+                                for y in 0..<h {
+                                    let src = srcBase.advanced(by: y * srcBPR)
+                                    let dst = dstBase.advanced(by: y * dstBPR)
+                                    memcpy(dst, src, rowBytes)
+                                }
+                                
+                                // Create CGContext ON the destination buffer to draw overlays
                                 guard let ctx = CGContext(
-                                    data: baseAddress,
+                                    data: dstBase,
                                     width: Int(imageSize.width),
                                     height: Int(imageSize.height),
                                     bitsPerComponent: 8,
-                                    bytesPerRow: bytesPerRow,
+                                    bytesPerRow: dstBPR,
                                     space: colorSpace,
                                     bitmapInfo: CGBitmapInfo.byteOrder32Little.rawValue | CGImageAlphaInfo.premultipliedFirst.rawValue
-                                    
                                 ) else {
+                                    CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly)
                                     CVPixelBufferUnlockBaseAddress(buffer, [])
                                     frameCount += 1
                                     return
                                 }
                                 
-                                let baseCI = CIImage(cvPixelBuffer: imageBuffer)
-                                if let cgImage = ciContext.createCGImage(baseCI, from: baseCI.extent) {
-                                    ctx.draw(cgImage, in: CGRect(origin: .zero, size: imageSize))
-                                }
                                 
-                                // --- Layout ---
-                                let fullGraphWidth = imageSize.width
-                                let halfGraphWidth = imageSize.width / 2
-
-                                // Determine visible overlay region based on setting
-                                let (graphAreaX, graphAreaWidth): (CGFloat, CGFloat) = {
-                                    if renderOneSideOnly {
-                                        switch overlayPosition {
-                                        case "Left":
-                                            return (0, halfGraphWidth)
-                                        case "Middle":
-                                            return (fullGraphWidth / 4, halfGraphWidth)
-                                        case "Right":
-                                            return (fullGraphWidth / 2, halfGraphWidth)
-                                        default:
-                                            return (0, halfGraphWidth)
-                                        }
-                                    } else {
-                                        return (0, fullGraphWidth)
-                                    }
-                                }()
-
-
-                                let graphPadding: CGFloat = 60 * scaleFactor
-                                let graphWidth = graphAreaWidth - 2 * graphPadding
-                                let graphHeight = (imageSize.height / 6) * 0.65
-                                let offsetX = graphAreaX + graphPadding  // shift graph drawing into the restricted region
-                                let offsetY: CGFloat = 80 * scaleFactor  // spacing from bottom
-
-                                let ftGraphY = offsetY + graphHeight + 80 * scaleFactor
-                                let fpsGraphY = offsetY
-
-                                let xScale = graphWidth / CGFloat(windowDuration)
-
                                 // === Frametime Graph ===
-                                let currentVisiblePoints = frameDeltaValues.filter {
-                                    $0.0 >= currentTime - windowDuration && $0.0 <= currentTime
-                                }
-
-                                let maxDelta = currentVisiblePoints.map { $0.1 }.max() ?? 1
+                                // Build from visible slice only (no global filter)
+                                let visTs = timestamps[leftFT..<rightFT]
+                                let visDt = deltas[leftFT..<rightFT]
+                                
+                                let maxDelta = visDt.max() ?? 1
                                 let minDelta: Double = 0
                                 let yScaleFT = graphHeight / CGFloat(maxDelta - minDelta)
-
-                                ctx.setStrokeColor(NSColor.green.cgColor)
+                                
+                                ctx.setStrokeColor(lineColor)
                                 ctx.setLineWidth(2.5 * scaleFactor)
                                 ctx.beginPath()
-
-                                for (i, (timestamp, delta)) in currentVisiblePoints.enumerated() {
+                                
+                                // Enumerate only visible slice
+                                var i = 0
+                                var idx = leftFT
+                                while idx < rightFT {
+                                    let timestamp = timestamps[idx]
+                                    let delta = deltas[idx]
                                     let x = offsetX + CGFloat(timestamp - (currentTime - windowDuration)) * xScale
                                     let y = ftGraphY + CGFloat(delta - minDelta) * yScaleFT
                                     if i == 0 {
@@ -1005,36 +1209,29 @@ public struct FrameAnalyzer {
                                     } else {
                                         ctx.addLine(to: CGPoint(x: x, y: y))
                                     }
+                                    i += 1
+                                    idx += 1
                                 }
                                 ctx.strokePath()
-
+                                
                                 // === FPS Graph ===
                                 var fpsBuckets: [(time: Double, fps: Double)] = []
-                                let step: Double = 0.25
-                                var bucketTime: Double = 0.0
-
-                                while bucketTime < currentTime {
-                                    let next = bucketTime + step
-                                    let timestamps = frameDeltaValues
-                                        .filter { $0.0 >= bucketTime && $0.0 < next }
-                                        .map { $0.0 }
-                                    
-                                    let fps: Double
-                                    if timestamps.count >= 2 {
-                                        let duration = timestamps.last! - timestamps.first!
-                                        fps = Double(timestamps.count - 1) / duration
-                                    } else {
-                                        fps = Double(timestamps.count)
+                                let startB = max(0, Int((currentTime - windowDuration) / bucketSize))
+                                let endB   = min(bucketCount - 1, Int(currentTime / bucketSize))
+                                fpsBuckets.reserveCapacity(max(0, endB - startB + 1))
+                                if startB <= endB {
+                                    for b in startB...endB {
+                                        fpsBuckets.append((time: Double(b) * bucketSize, fps: fpsForBucket(b)))
                                     }
-                                    
-                                    fpsBuckets.append((time: bucketTime, fps: fps))
-                                    bucketTime = next
                                 }
 
+                                // keep only points inside the window and draw clamped to the windowStart
                                 let visibleFpsPoints = fpsBuckets.filter {
-                                    $0.time >= currentTime - windowDuration && $0.time <= currentTime
+                                    $0.time >= windowStart && $0.time <= currentTime
                                 }
 
+                                // Right-aligning the graph from the very first frame
+                                let xWindowStart = currentTime - windowDuration   // may be negative early on
 
                                 // clamp to zero whenever the FPS span is under 1
                                 let windowFps = visibleFpsPoints.map { $0.fps }
@@ -1054,12 +1251,14 @@ public struct FrameAnalyzer {
                                 // scale factor
                                 let fpsYScale = graphHeight / CGFloat(fpsRange)
 
-                                ctx.setStrokeColor(NSColor.green.cgColor)
+                                ctx.setStrokeColor(lineColor)
                                 ctx.setLineWidth(2.5 * scaleFactor)
                                 ctx.beginPath()
 
                                 for (i, point) in visibleFpsPoints.enumerated() {
-                                    let x = offsetX + CGFloat(point.time - (currentTime - windowDuration)) * xScale
+                                    // clamp time to real visible window
+                                    let clampedTime = min(max(point.time, windowStart), currentTime)
+                                    let x = offsetX + CGFloat(clampedTime - xWindowStart) * xScale
                                     let y = fpsGraphY + CGFloat(point.fps - minFps) * fpsYScale
                                     if i == 0 {
                                         ctx.move(to: CGPoint(x: x, y: y))
@@ -1069,106 +1268,71 @@ public struct FrameAnalyzer {
                                 }
                                 ctx.strokePath()
 
-                                // === Axes ===
-                                ctx.setStrokeColor(NSColor.white.cgColor)
-                                ctx.setLineWidth(1.0 * scaleFactor)
 
+                                
+                                // === Axes ===
+                                ctx.setStrokeColor(whiteCG)
+                                ctx.setLineWidth(1.0 * scaleFactor)
+                                
                                 // Y axes
                                 ctx.stroke(CGRect(x: offsetX, y: ftGraphY, width: 0, height: graphHeight))
                                 ctx.stroke(CGRect(x: offsetX, y: fpsGraphY, width: 0, height: graphHeight))
-
+                                
                                 // X axes
                                 ctx.stroke(CGRect(x: offsetX, y: ftGraphY, width: graphWidth, height: 0))
                                 ctx.stroke(CGRect(x: offsetX, y: fpsGraphY, width: graphWidth, height: 0))
-
+                                
                                 // === FPS Text Box ===
-                                let currentBucket = Double(Int(currentTime / 0.25)) * 0.25
-                                let fallbackFPS = fpsBuckets.last?.fps ?? 0
-                                let rawFPS = fpsBuckets.first(where: { abs($0.time - currentBucket) < 0.001 })?.fps ?? fallbackFPS
-
+                                let currentBucket = floor(currentTime / bucketSize) * bucketSize
+                                let fallbackFPS = visibleFpsPoints.last?.fps ?? 0
+                                let rawFPS = visibleFpsPoints.first(where: { abs($0.time - currentBucket) < 0.001 })?.fps ?? fallbackFPS
+                                
                                 // round to nearest whole number, then display
                                 let liveFPS = Int(round(rawFPS))
                                 let fpsText = "Output FPS: \(liveFPS)"
-
-                                // Set up font
-                                let fontSize: CGFloat = 58 * scaleFactor
-                                let fontName = "Menlo-Bold"
-                                let font = CTFontCreateWithName(fontName as CFString, fontSize, nil)
-
-                                let attributes: [NSAttributedString.Key: Any] = [
-                                    .font: font,
-                                    .foregroundColor: CGColor(gray: 1.0, alpha: 1.0)
-                                ]
-
-                                let attrString = NSAttributedString(string: fpsText, attributes: attributes)
-                                let line = CTLineCreateWithAttributedString(attrString)
-
-                                // Adjust position
-                                let fpsTextPosX: CGFloat = {
-                                    if renderOneSideOnly {
-                                        switch overlayPosition {
-                                        case "Left":
-                                            return 60 * scaleFactor
-                                        case "Middle":
-                                            return imageSize.width / 2 - 240 * scaleFactor
-                                        case "Right":
-                                            return imageSize.width - 680 * scaleFactor
-                                        default:
-                                            return imageSize.width - 680 * scaleFactor
-                                        }
-                                    } else {
-                                        return imageSize.width - 680 * scaleFactor
-                                    }
-                                }()
-
-                                let attr = NSAttributedString(string: fpsText, attributes: [
-                                    .font: font,
-                                    .strokeColor: NSColor.black,
+                                
+                                // Set up font and draw dynamic string
+                                let fpsAttr: [NSAttributedString.Key: Any] = [
+                                    .font: fontMenloBoldFPSBox,
+                                    .strokeColor: blackNS,
                                     .foregroundColor: NSColor.white,
                                     .strokeWidth: -2.0
-                                ])
-                                ctx.textPosition = CGPoint(x: fpsTextPosX, y: imageSize.height - 120 * scaleFactor)
-                                CTLineDraw(CTLineCreateWithAttributedString(attr), ctx)
-
+                                ]
+                                let fpsAttrString = NSAttributedString(string: fpsText, attributes: fpsAttr)
+                                ctx.textPosition = CGPoint(
+                                    x: renderOneSideOnly ?
+                                        (overlayPosition == "Left" ? 60 * scaleFactor :
+                                         overlayPosition == "Middle" ? imageSize.width / 2 - 240 * scaleFactor :
+                                         imageSize.width - 680 * scaleFactor) :
+                                        imageSize.width - 680 * scaleFactor,
+                                    y: imageSize.height - 120 * scaleFactor
+                                )
+                                CTLineDraw(CTLineCreateWithAttributedString(fpsAttrString), ctx)
+                                
                                 // === Add Frametime label ===
-                                let frametimeLabel = "Frametime"
-                                let frametimeAttr = [
-                                    NSAttributedString.Key.font: CTFontCreateWithName("Menlo-Bold" as CFString, 60 * scaleFactor, nil),
-                                    NSAttributedString.Key.foregroundColor: NSColor.white,
-                                    NSAttributedString.Key.strokeColor: NSColor.black,
-                                    NSAttributedString.Key.strokeWidth: -2.0
-                                ]
-                                let frametimeText = NSAttributedString(string: frametimeLabel, attributes: frametimeAttr)
-                                let frametimePos = CGPoint(x: offsetX + 20 * scaleFactor, y: ftGraphY + graphHeight + 10 * scaleFactor)
-                                ctx.textPosition = frametimePos
-                                CTLineDraw(CTLineCreateWithAttributedString(frametimeText), ctx)
-
-
+                                ctx.textPosition = CGPoint(x: offsetX + 20 * scaleFactor, y: ftGraphY + graphHeight + 10 * scaleFactor)
+                                CTLineDraw(frametimeLabelLine, ctx)
+                                
                                 // === Add FPS label ===
-                                let fpsGraphLabel = "FPS"
-                                let fpsGraphAttr = [
-                                    NSAttributedString.Key.font: CTFontCreateWithName("Menlo-Bold" as CFString, 60 * scaleFactor, nil),
-                                    NSAttributedString.Key.foregroundColor: NSColor.white,
-                                    NSAttributedString.Key.strokeColor: NSColor.black,
-                                    NSAttributedString.Key.strokeWidth: -2.0
-                                ]
-                                let fpsGraphText = NSAttributedString(string: fpsGraphLabel, attributes: fpsGraphAttr)
-                                let fpsGraphPos = CGPoint(x: offsetX + 20 * scaleFactor, y: fpsGraphY + graphHeight + 10 * scaleFactor)
-                                ctx.textPosition = fpsGraphPos
-                                CTLineDraw(CTLineCreateWithAttributedString(fpsGraphText), ctx)
-
-
+                                ctx.textPosition = CGPoint(x: offsetX + 20 * scaleFactor, y: fpsGraphY + graphHeight + 10 * scaleFactor)
+                                CTLineDraw(fpsGraphLabelLine, ctx)
+                                
                                 // === Frametime Y-axis scale marks ===
-                                let uniqueFTValues = Set(visiblePoints.map { round($0.1 * 10000) / 10 })
-
+                                var uniqueFTValues = Set<Double>()
+                                uniqueFTValues.reserveCapacity(visCount)
+                                idx = leftFT
+                                while idx < rightFT {
+                                    let v = round(deltas[idx] * 10000) / 10 // matches your rounding
+                                    uniqueFTValues.insert(v)
+                                    idx += 1
+                                }
+                                
                                 let ftRange = maxDelta - minDelta
                                 let frametimeGraphHeight: CGFloat = graphHeight
                                 let frametimeYScale: CGFloat = ftRange != 0 ? frametimeGraphHeight / CGFloat(ftRange) : 1.0
-
-
                                 var lastFtLabelY: CGFloat = -CGFloat.infinity
                                 let minFtSpacing: CGFloat = 28.0 * scaleFactor
-
+                                
                                 for value in uniqueFTValues.sorted() {
                                     let y = ftGraphY + CGFloat((value / 1000.0) - minDelta) * frametimeYScale
                                     if abs(y - lastFtLabelY) < minFtSpacing { continue }
@@ -1176,7 +1340,7 @@ public struct FrameAnalyzer {
                                     
                                     let tickStart = CGPoint(x: offsetX - 5 * scaleFactor, y: y)
                                     let tickEnd = CGPoint(x: offsetX, y: y)
-                                    ctx.setStrokeColor(NSColor.white.cgColor)
+                                    ctx.setStrokeColor(whiteCG)
                                     ctx.setLineWidth(1.0 * scaleFactor)
                                     ctx.beginPath()
                                     ctx.move(to: tickStart)
@@ -1185,26 +1349,25 @@ public struct FrameAnalyzer {
                                     
                                     let label = String(format: "%.1f", value)
                                     let attributes: [NSAttributedString.Key: Any] = [
-                                        .font: CTFontCreateWithName("Menlo" as CFString, 22 * scaleFactor, nil),
+                                        .font: fontMenloFTTicks,
                                         .foregroundColor: NSColor.white,
-                                        .strokeColor: NSColor.black,
+                                        .strokeColor: blackNS,
                                         .strokeWidth: -2.0
                                     ]
                                     let attrText = NSAttributedString(string: label, attributes: attributes)
                                     ctx.textPosition = CGPoint(x: offsetX - 57 * scaleFactor, y: y - 8 * scaleFactor)
                                     CTLineDraw(CTLineCreateWithAttributedString(attrText), ctx)
                                 }
-
-
-
-
-
+                                
                                 // === FPS Y-axis scale marks ===
-                                let uniqueFPSValues = Set(visibleFpsPoints.map { round($0.fps) })
-
+                                var uniqueFPSValues = Set<Double>()
+                                uniqueFPSValues.reserveCapacity(visibleFpsPoints.count)
+                                for p in visibleFpsPoints {
+                                    uniqueFPSValues.insert(round(p.fps))
+                                }
                                 var lastFpsLabelY: CGFloat = -CGFloat.infinity
                                 let minFpsSpacing: CGFloat = 28.0 * scaleFactor
-
+                                
                                 for value in uniqueFPSValues.sorted() {
                                     let y = fpsGraphY + (CGFloat(value - minFps) * fpsYScale)
                                     if abs(y - lastFpsLabelY) < minFpsSpacing { continue }
@@ -1212,8 +1375,7 @@ public struct FrameAnalyzer {
                                     
                                     let tickStart = CGPoint(x: offsetX - 5 * scaleFactor, y: y)
                                     let tickEnd = CGPoint(x: offsetX, y: y)
-                                    
-                                    ctx.setStrokeColor(NSColor.white.cgColor)
+                                    ctx.setStrokeColor(whiteCG)
                                     ctx.setLineWidth(1.0)
                                     ctx.beginPath()
                                     ctx.move(to: tickStart)
@@ -1222,22 +1384,26 @@ public struct FrameAnalyzer {
                                     
                                     let label = String(format: "%.0f", value)
                                     let attributes: [NSAttributedString.Key: Any] = [
-                                        .font: CTFontCreateWithName("Menlo" as CFString, 25 * scaleFactor, nil),
+                                        .font: fontMenloFPSTicks,
                                         .foregroundColor: NSColor.white,
-                                        .strokeColor: NSColor.black,
+                                        .strokeColor: blackNS,
                                         .strokeWidth: -2.0
                                     ]
                                     let attrText = NSAttributedString(string: label, attributes: attributes)
                                     ctx.textPosition = CGPoint(x: offsetX - 40 * scaleFactor, y: y - 8 * scaleFactor)
                                     CTLineDraw(CTLineCreateWithAttributedString(attrText), ctx)
-
                                 }
-
                                 
+                                // Unlock buffers now that drawing is done
+                                CVPixelBufferUnlockBaseAddress(imageBuffer, .readOnly)
                                 CVPixelBufferUnlockBaseAddress(buffer, [])
                                 
-                                let presentationTime = CMTime(value: CMTimeValue(frameCount), timescale: CMTimeScale(nominalFrameRate))
-                                adaptor.append(buffer, withPresentationTime: presentationTime)
+                                // Extra safety: check isReadyForMoreMediaData again before appending
+                                if writerInput.isReadyForMoreMediaData {
+                                    let presentationTime = CMTime(value: CMTimeValue(frameCount), timescale: CMTimeScale(nominalFrameRate))
+                                    adaptor.append(buffer, withPresentationTime: presentationTime)
+                                }
+                                
                                 frameCount += 1
                             }
                         }
@@ -1248,9 +1414,10 @@ public struct FrameAnalyzer {
                                 onComplete(outputLog)
                             }
                         }
-                        
                     }
                 }
+
+
             }
 
 
@@ -1294,9 +1461,9 @@ public struct FrameAnalyzer {
             
             log("✅ Saved output to \(outputURL.path)")
             log("📁 Using video file: \(videoPath)")
-            log("⚠️ WARNING: This is the early prototype version, it’s full of bugs and provides false positives if fed with video full of screen tearing!")
+            log("⚠️ WARNING: This is the early alpha version, it’s full of bugs and provides false positives if fed with video full of screen tearing!")
             
-            if !exportGraph || (graphType != "Animated Overlay") {
+            if !exportAnimated {
                 onComplete(outputLog)
                     return outputLog
                 }
@@ -1435,7 +1602,7 @@ public struct FrameAnalyzer {
                 let strongTearLine = maxRowJump > pixelDiffThreshold || midFrameJump > (pixelDiffThreshold * 0.75)
 
 
-                // New fallback cue for strong visual signal
+                // Fallback cue for strong visual signal
                 let strongVisualCue = stddev > 20.0 || avgEdgeStrength > 1.0 || luminanceGradient > 10.0
 
                 let shouldBlock = !strongTearLine && !strongVisualCue
@@ -1501,9 +1668,7 @@ public struct FrameAnalyzer {
             
             return Double(mse)
         }; return outputLog
-        if !exportGraph || !(graphType == "Interactive" || graphType == "Image" || graphType == "Animated Overlay") {
-            onComplete(outputLog)
-        }
+        
 
         
     }

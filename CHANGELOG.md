@@ -1,5 +1,18 @@
 # Changelog
 
+## Alpha [0.3.0] - 2025-08-11
+### Added
+- Apple Pro Res 422 codec for Animated Overlay (Improves performance!)
+- 1000 ms Response Rate option (because 250 ms is not suitable for locked footage)
+- Option to change graphs color
+- Customisable multithreading chunk splitting (Significantly reduces multithreading path RAM load, allows fine tuning for even greater performance!)
+- RAM managing system (multithreading mode will adjust its behaviour to the amount of available RAM, but won't run out of it!)
+- New settings UI
+- Animations
+## Improved
+- Multithreading performance
+- Animated Overlay rendering performance (including H.264)
+
 ## Alpha [0.2.4] - 2025-05-29
 ### Added
 - Version display in settings menu
