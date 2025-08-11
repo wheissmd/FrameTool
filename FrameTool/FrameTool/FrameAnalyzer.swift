@@ -954,8 +954,7 @@ public struct FrameAnalyzer {
                     AVVideoH264EntropyModeKey: AVVideoH264EntropyModeCABAC
                 ]
 
-                // --- Codec selection by string ---
-                // If codec == "ProRes" → Apple ProRes 422, else H.264
+                // Codec selection by string
                 let selectedCodec: AVVideoCodecType = (codec == "ProRes")
                     ? AVVideoCodecType(rawValue: "apco")
                     : .h264
@@ -979,7 +978,6 @@ public struct FrameAnalyzer {
                         kCVPixelBufferPixelFormatTypeKey as String: Int(kCVPixelFormatType_32BGRA),
                         kCVPixelBufferWidthKey as String: Int(imageSize.width),
                         kCVPixelBufferHeightKey as String: Int(imageSize.height),
-                        // Allow IOSurface-backed fast paths
                         kCVPixelBufferIOSurfacePropertiesKey as String: [:]
                     ]
                     
@@ -1184,8 +1182,6 @@ public struct FrameAnalyzer {
                                     return
                                 }
                                 
-                                // --- Layout ---
-                                // (precomputed above)
                                 
                                 // === Frametime Graph ===
                                 // Build from visible slice only (no global filter)
@@ -1234,7 +1230,7 @@ public struct FrameAnalyzer {
                                     $0.time >= windowStart && $0.time <= currentTime
                                 }
 
-                                // NEW: This is for right-aligning the graph from the very first frame
+                                // Right-aligning the graph from the very first frame
                                 let xWindowStart = currentTime - windowDuration   // may be negative early on
 
                                 // clamp to zero whenever the FPS span is under 1
@@ -1262,7 +1258,6 @@ public struct FrameAnalyzer {
                                 for (i, point) in visibleFpsPoints.enumerated() {
                                     // clamp time to real visible window
                                     let clampedTime = min(max(point.time, windowStart), currentTime)
-                                    // use xWindowStart instead of windowStart so "now" is always at right edge
                                     let x = offsetX + CGFloat(clampedTime - xWindowStart) * xScale
                                     let y = fpsGraphY + CGFloat(point.fps - minFps) * fpsYScale
                                     if i == 0 {
@@ -1296,7 +1291,7 @@ public struct FrameAnalyzer {
                                 let liveFPS = Int(round(rawFPS))
                                 let fpsText = "Output FPS: \(liveFPS)"
                                 
-                                // Set up font (cached) and draw dynamic string
+                                // Set up font and draw dynamic string
                                 let fpsAttr: [NSAttributedString.Key: Any] = [
                                     .font: fontMenloBoldFPSBox,
                                     .strokeColor: blackNS,
@@ -1315,17 +1310,14 @@ public struct FrameAnalyzer {
                                 CTLineDraw(CTLineCreateWithAttributedString(fpsAttrString), ctx)
                                 
                                 // === Add Frametime label ===
-                                // (use prebuilt CTLine)
                                 ctx.textPosition = CGPoint(x: offsetX + 20 * scaleFactor, y: ftGraphY + graphHeight + 10 * scaleFactor)
                                 CTLineDraw(frametimeLabelLine, ctx)
                                 
                                 // === Add FPS label ===
-                                // (use prebuilt CTLine)
                                 ctx.textPosition = CGPoint(x: offsetX + 20 * scaleFactor, y: fpsGraphY + graphHeight + 10 * scaleFactor)
                                 CTLineDraw(fpsGraphLabelLine, ctx)
                                 
                                 // === Frametime Y-axis scale marks ===
-                                // Keep exact behavior: unique values from visible points (rounded like before)
                                 var uniqueFTValues = Set<Double>()
                                 uniqueFTValues.reserveCapacity(visCount)
                                 idx = leftFT
@@ -1368,7 +1360,6 @@ public struct FrameAnalyzer {
                                 }
                                 
                                 // === FPS Y-axis scale marks ===
-                                // Keep exact behavior: unique integer FPS values from visible points
                                 var uniqueFPSValues = Set<Double>()
                                 uniqueFPSValues.reserveCapacity(visibleFpsPoints.count)
                                 for p in visibleFpsPoints {
@@ -1611,7 +1602,7 @@ public struct FrameAnalyzer {
                 let strongTearLine = maxRowJump > pixelDiffThreshold || midFrameJump > (pixelDiffThreshold * 0.75)
 
 
-                // New fallback cue for strong visual signal
+                // Fallback cue for strong visual signal
                 let strongVisualCue = stddev > 20.0 || avgEdgeStrength > 1.0 || luminanceGradient > 10.0
 
                 let shouldBlock = !strongTearLine && !strongVisualCue

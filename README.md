@@ -27,7 +27,7 @@ The app calculates:
 - **Minimum FPS**
 - **Maximum FPS**
 - **Exports csv Table with every frame's display time**
-- **Has options for additional exports (like Graphs or Statistics)**
+- **Has options for additional exports (like Graphs, Statistics and Animated Overlay)**
 
 These calculations are based solely on the **frame time that was captured**, and do **not reflect internal game engine behavior**. As such, FrameTool's readings do **not directly compare to** tools like MSI Afterburner or Fraps.
 
@@ -39,7 +39,7 @@ Installation of the app:
 Using FrameTool is simple:
 1. Launch the app
 2. Set up the output location (defaults to user/Documents)
-3. Set up additional exports you would like (CSV statistics or Graph Output) in the settings menu
+3. Set up additional exports you would like (CSV statistics, Interactive Graph or Animated Overlay) in the settings menu
 4. Drop a video file to a drag and drop section
 5. Press "Run Analysis"
 6. Wait for the analysis to complete
@@ -51,16 +51,14 @@ A test sample video is provided within the `.dmg` installer to demonstrate how t
 
 > ⚠️ **Important:** The analyzed video must be free of screen tearing. Any tearing will cause the app to falsely detect new frames. Poor bitrate of the video might also result in falsely detecting new frames, it is not recommended to process the videos recorded on Intel Arc by its own codec (AMD and Nvidia is fine as long as its reasonable bitrate). Additionally, the app does **not** report FPS values higher than the framerate the video was recorded at.
 
-> ⚠️ **Note:** Tearing Detection algorithm is available in v0.2.X, however, it is experimental and known to produce both false negative and positive results. You can use this mode for entertainment, but it is in the early development stage. To acccess this mode hold ⌥ (Option Button) in the settings menu.
+> ⚠️ **Note:** Tearing Detection algorithm is available in v0.2.0 and newer, however, it is experimental and known to produce both false negative and positive results. You can use this mode for entertainment, but it is in the early development stage. To access this mode hold ⌥ (Option Button) in the settings menu.
 
 ---
 
 ## System Requirements
 
 - Tested on **Apple Silicon Macs only**, however the v0.1.0 and newer **may** run on **Intel-based Macs**
-- **8GB RAM recommended** for Single threading processing
-- **16GB RAM recommended** for Multithreading accelleration for 4K videos under 1 minute long
-- **24GB RAM recommended** for Multithreading accelleration for 4K videos over 1 minute long
+- **16GB RAM recommended** for Multithreading acceleration
 - macOS Sequoia 15.1 or newer for v0.1.0 and newer
 
 ---
@@ -80,11 +78,11 @@ A test sample video is provided within the `.dmg` installer to demonstrate how t
 
 - Multiple bugfixes
 - Addition of customizable graph output designs
-- Animated Overlay render optimization
+- GPU acceleration for Animated Overlay
+- One more vocaloid theme
 - Better statistics output options
-- Ability to run multiple graph outputs for a single analysis
-- Windows port with different UI framework
-- More customization and settings with a better layout
+- Windows port with different UI framework (hopefully will start development in 2050)
+- Queue for multiple analysis
   
 ---
 

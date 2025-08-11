@@ -124,7 +124,7 @@ extension Color {
                                        customThemeEnabled: Bool,
                                        themeType: String,
                                        colorScheme: ColorScheme) -> Color {
-            // Theme overrides (unchanged)
+            // Theme overrides
             if customThemeEnabled {
                 if themeType == "Hatsune Miku" {
                     return selected
@@ -137,7 +137,7 @@ extension Color {
                 }
             }
 
-            // System style (fix: no more hard-coded gray)
+            // System style
             if selected {
                 // light chip in Light Mode, subtle light chip in Dark Mode
                 return colorScheme == .dark
@@ -207,7 +207,7 @@ struct ColorSelect {
     }
 }
 
-// MARK: - New Config (clean)
+// MARK: - Config
 
 struct AppConfig: Codable, Equatable {
     var exportPath: String = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!.path
@@ -1091,7 +1091,7 @@ struct SettingsPopup: View {
 
 
 
-    // Helpers used in tooltips
+    // Helper used in tooltips
     func getScalingImage(for scale: Int) -> NSImage? {
         let value: Int
         switch scale {
@@ -1157,7 +1157,7 @@ struct TabsPicker: View {
         .frame(height: 44)
     }
 
-    // MARK: - Background (very light, shadow-free)
+    // MARK: - Background
     private var trayBackground: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
