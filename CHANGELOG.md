@@ -1,5 +1,9 @@
 # Changelog
 
+## Alpha [0.3.0.1 - Hotfix] - 2025-08-11
+## Improved
+- Fixed critical bug with infinite analyzing on 8GB macs when multithreading is enabled
+
 ## Alpha [0.3.0] - 2025-08-11
 ### Added
 - Apple Pro Res 422 codec for Animated Overlay (Improves performance!)
