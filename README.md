@@ -9,7 +9,6 @@
     </td>
     <td>
       <img width="400" alt="Screenshot 2" src="https://github.com/user-attachments/assets/68fd7cd5-4ebf-4f88-a4a6-d1bb122f0559" />
-" />
     </td>
   </tr>
 </table>
