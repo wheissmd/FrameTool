@@ -266,6 +266,7 @@ struct ContentView: View {
 
     @State private var config = AppConfig()
     @State private var showSettings = false
+    @State private var showQueue = false
 
     var themeArtAttribution: String {
         if config.app.useCustomTheme && config.app.theme == .miku {
@@ -314,10 +315,39 @@ struct ContentView: View {
 
     var body: some View {
         ZStack(alignment: .topLeading) {
-            Button(action: { showSettings.toggle() }) {
-                Image(systemName: "gearshape").imageScale(.large).padding(6).foregroundColor(settingsIconColor)
+            VStack(spacing: 8) {
+                // Settings
+                Button(action: { showSettings.toggle() }) {
+                    Image(systemName: "gearshape")
+                        .imageScale(.large)
+                        .padding(6)
+                        .foregroundColor(settingsIconColor)
+                        .help("Settings")
+                }
+                // Queue
+                Button(action: { showQueue.toggle() }) {
+                    Image(systemName: "list.bullet.rectangle")
+                        .imageScale(.large)
+                        .padding(6)
+                        .foregroundColor(settingsIconColor)
+                        .help("Render queue")
+                }
             }
             .offset(x: -120, y: 12)
+            .onChange(of: showSettings) { isOpening in
+                if isOpening {
+                    var t = Transaction(); t.disablesAnimations = true
+                    withTransaction(t) { showQueue = false }   // hide queue instantly → no flicker
+                }
+            }
+            .onChange(of: showQueue) { isOpening in
+                if isOpening {
+                    var t = Transaction(); t.disablesAnimations = true
+                    withTransaction(t) { showSettings = false } // hide settings instantly → no flicker
+                }
+            }
+
+
 
             VStack(spacing: 14) {
                 HStack { Spacer() }
@@ -453,8 +483,32 @@ struct ContentView: View {
                         .shadow(radius: 10).padding(.top, 60).offset(x: 0, y: 33)
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
+                if showQueue {
+                        QueuePopup(customThemeEnabled: config.app.useCustomTheme,
+                                   themeType: config.app.theme.rawValue)
+                            .frame(width: 600)
+                            .padding()
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(
+                                        config.app.useCustomTheme
+                                        ? (config.app.theme == .miku
+                                           ? Color(red: 104/255, green: 160/255, blue: 204/255)
+                                           : (config.app.theme == .luka
+                                              ? Color(red: 191/255, green: 116/255, blue: 141/255)
+                                              : Color(NSColor.windowBackgroundColor)))
+                                        : Color(NSColor.windowBackgroundColor)
+                                    )
+                            )
+                            .shadow(radius: 10)
+                            .padding(.top, 60)
+                            .offset(x: 0, y: 33)
+                            .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                
             }
             .animation(.easeInOut(duration: 0.25), value: showSettings)
+            .animation(.easeInOut(duration: 0.25), value: showQueue)
         }
         .frame(width: 600)
         .background {
@@ -539,6 +593,203 @@ struct ContentView: View {
     }
 }
 
+// MARK: - Drag & Drop Reorder
+
+private struct QueueDropDelegate: DropDelegate {
+    let item: QueuePopup.QueueItem
+    @Binding var items: [QueuePopup.QueueItem]
+    @Binding var draggingItem: QueuePopup.QueueItem?
+
+    func validateDrop(info: DropInfo) -> Bool { true }
+
+    func dropEntered(info: DropInfo) {
+        guard let dragging = draggingItem, dragging != item,
+              let from = items.firstIndex(of: dragging),
+              let to = items.firstIndex(of: item)
+        else { return }
+
+        if items[to].id != dragging.id {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                items.move(fromOffsets: IndexSet(integer: from), toOffset: (to > from) ? to + 1 : to)
+            }
+        }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggingItem = nil
+        return true
+    }
+}
+
+// MARK: - QueuePopup
+struct QueuePopup: View {
+    struct QueueItem: Identifiable, Equatable {
+        let id = UUID()
+        let url: URL
+    }
+    
+    var customThemeEnabled: Bool
+        var themeType: String
+
+        private var footerColor: Color {
+            (customThemeEnabled && (themeType == "Hatsune Miku" || themeType == "Megurine Luka")) ? .black : .white
+        }
+
+    @State private var items: [QueueItem] = []
+    @State private var draggingItem: QueueItem?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            // Header and button
+            HStack(spacing: 8) {
+                Image(systemName: "list.bullet.rectangle")
+                    .font(.system(size: 16, weight: .semibold))
+                Text("Render Queue")
+                    .font(.system(size: 16, weight: .semibold))
+                Spacer()
+                Button {
+                    addVideos()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "plus.circle")
+                        Text("Add video files")
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
+
+            // List
+            if items.isEmpty {
+                // Non-interactive placeholder
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(NSColor.controlBackgroundColor))
+                    .overlay(
+                        Text("Add video files before configuring the set up")
+                            .foregroundColor(.secondary)
+                            .padding(12)
+                    )
+                    .frame(height: 180)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 6) {
+                        ForEach(items) { item in
+                            rowView(item)
+                                .onDrag {
+                                    draggingItem = item
+                                    return NSItemProvider(object: item.id.uuidString as NSString)
+                                }
+                                .onDrop(of: [.text], delegate: QueueDropDelegate(
+                                    item: item,
+                                    items: $items,
+                                    draggingItem: $draggingItem
+                                ))
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                .frame(minHeight: 160, maxHeight: 260)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(NSColor.controlBackgroundColor))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                )
+                
+                
+            }
+            Text("v0.3.1-Alpha")
+              .font(.caption2)
+              .foregroundStyle(.secondary)
+        }
+    }
+
+    // Row
+
+    private func rowView(_ item: QueueItem) -> some View {
+        HStack(spacing: 10) {
+            // Left: icon + name
+            HStack(spacing: 8) {
+                Image(systemName: "film")
+                    .font(.system(size: 14, weight: .semibold))
+                Text(item.url.lastPathComponent)
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer(minLength: 12)
+
+            // Right: settings + delete
+            HStack(spacing: 8) {
+                Button {
+                    openItemSettings(item)
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .buttonStyle(.borderless)
+
+                Button {
+                    remove(item)
+                } label: {
+                    Image(systemName: "xmark.circle")
+                }
+                .buttonStyle(.borderless)
+            }
+            
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color(NSColor.textBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.gray.opacity(0.2), lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 6))
+        .padding(.horizontal, 8)
+        
+    }
+
+    // Actions
+
+    private func addVideos() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedFileTypes = ["mov", "mp4", "m4v", "avi", "mkv", "webm"]
+
+        if panel.runModal() == .OK {
+            let newItems = panel.urls
+                .filter { url in !items.contains(where: { $0.url == url }) }
+                .map { QueueItem(url: $0) }
+            if !newItems.isEmpty {
+                items.append(contentsOf: newItems)
+            }
+        }
+        
+    }
+    
+
+    private func remove(_ item: QueueItem) {
+        if let idx = items.firstIndex(of: item) {
+            items.remove(at: idx)
+        }
+    }
+
+    private func openItemSettings(_ item: QueueItem) {
+        // Placeholder to wire individual settings
+    }
+}
+
 // MARK: - SettingsPopup with Tabs
 
 struct SettingsPopup: View {
@@ -600,6 +851,12 @@ struct SettingsPopup: View {
     var body: some View {
         ZStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 22) {
+                HStack(spacing: 8) {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 16, weight: .semibold))
+                    Text("Settings")
+                        .font(.system(size: 16, weight: .semibold))
+                }
                 TabsPicker(tab: $tab,
                            customThemeEnabled: config.app.useCustomTheme,
                            themeType: config.app.theme.rawValue,
@@ -613,7 +870,7 @@ struct SettingsPopup: View {
                     }
                 }
 
-                Text("v0.3.0.1-Alpha")
+                Text("v0.3.1-Alpha")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
