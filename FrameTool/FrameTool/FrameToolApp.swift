@@ -9,6 +9,9 @@ import SwiftUI
 
 @main
 struct FrameToolApp: App {
+    init() {
+            _ = QueueStore.purgeIfFirstLaunch()
+        }
     var body: some Scene {
         Window("Frame Tool", id: "main") {
             ContentView()

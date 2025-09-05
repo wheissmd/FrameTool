@@ -3,9 +3,32 @@
 //
 //  Created by wheissmd on 17/04/2025.
 
+import UniformTypeIdentifiers
 import AVFoundation
 import SwiftUI
 import AppKit
+
+// MARK: - Tooltip Window Identifier
+
+@inline(__always)
+func tooltipHostWindow() -> NSWindow? {
+    let mouse = NSEvent.mouseLocation
+    let windows = NSApp.windows
+        .filter { $0.isVisible && $0.alphaValue > 0.01 }
+        .sorted { $0.level.rawValue > $1.level.rawValue }
+
+    for w in windows {
+        if w.ignoresMouseEvents { continue }
+        if w.frame.contains(mouse) { return w }
+    }
+    return NSApp.keyWindow ?? NSApp.mainWindow
+}
+
+// MARK: - Blur text field outline
+@inline(__always)
+private func blurFirstResponder() {
+    NSApp.keyWindow?.makeFirstResponder(nil)
+}
 
 // MARK: - Spinner & GIF
 
@@ -71,6 +94,25 @@ extension View {
         clipShape(RoundedCorner(radius: radius, corners: corners))
     }
 }
+
+extension QueueItem {
+    func effectiveOutput(using main: OutputSettings, position: Int) -> OutputSettings {
+        var result = perItemOutput ?? main
+
+        // Handle file name
+        if fileNameEdited {
+            // keep custom value from perItemOutput
+            if let custom = perItemOutput?.fileName {
+                result.fileName = custom
+            }
+        } else {
+            // dynamic suffix
+            result.fileName = "\(main.fileName)-\(position + 1)"
+        }
+        return result
+    }
+}
+
 
 struct RoundedCorner: Shape {
     var radius: CGFloat
@@ -219,6 +261,9 @@ struct AppConfig: Codable, Equatable {
 struct OutputSettings: Codable, Equatable {
     var enable250ms: Bool = false
 
+    var fileName: String = "Output"
+    var exportCsvFrametimes: Bool = false
+
     enum CsvMode: String, Codable, CaseIterable { case general = "General", detailed = "Detailed" }
     var exportCsvSummary: Bool = false
     var csvSummaryMode: CsvMode = .general
@@ -229,13 +274,14 @@ struct OutputSettings: Codable, Equatable {
 
     var graphColorHex: String = "#33B170FF"
 
-    var overlayScale: CGFloat = 100        // 50…150
+    var overlayScale: CGFloat = 100
     var renderOneSideOnly: Bool = false
     enum OverlaySide: String, Codable, CaseIterable { case left = "Left", middle = "Middle", right = "Right" }
     var overlayPosition: OverlaySide = .left
 
     var tearingDetection: Bool = false
 }
+
 
 struct PerformanceSettings: Codable, Equatable {
     var multithreadingEnabled: Bool = false
@@ -267,6 +313,7 @@ struct ContentView: View {
     @State private var config = AppConfig()
     @State private var showSettings = false
     @State private var showQueue = false
+    @State private var queueItems: [QueueItem] = []
 
     var themeArtAttribution: String {
         if config.app.useCustomTheme && config.app.theme == .miku {
@@ -418,7 +465,12 @@ struct ContentView: View {
             .frame(width: 600, height: 700)
             .disabled(isAnalyzing)
             .padding()
-            .onAppear(perform: loadConfig)
+            .onAppear {
+                loadConfig()
+                _ = QueueStore.purgeIfFirstLaunch()  // clear cache once per app run
+                queueItems = QueueStore.load()       // load any cached queue (will be empty after purge)
+            }
+            .onChange(of: queueItems) { QueueStore.save($0) }
             .onReceive(timer) { _ in if isAnalyzing { processingDuration += 1 } }
             .onChange(of: config.app.theme) { _ in if isPlayingMusic { audioPlayer?.stop(); isPlayingMusic = false } }
 
@@ -467,7 +519,7 @@ struct ContentView: View {
 
             ZStack {
                 if showSettings {
-                    SettingsPopup(config: $config)
+                    SettingsPopup(config: $config, isRunning: isRunning)
                         .frame(width: 600).padding()
                         .background(
                             RoundedRectangle(cornerRadius: 12).fill(
@@ -484,8 +536,8 @@ struct ContentView: View {
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
                 if showQueue {
-                        QueuePopup(customThemeEnabled: config.app.useCustomTheme,
-                                   themeType: config.app.theme.rawValue)
+                    QueuePopup(items: $queueItems, isRunning: isRunning, customThemeEnabled: config.app.useCustomTheme,
+                               themeType: config.app.theme.rawValue, globalOutput: $config.output)
                             .frame(width: 600)
                             .padding()
                             .background(
@@ -593,50 +645,521 @@ struct ContentView: View {
     }
 }
 
+// MARK: - Per-item editor
+
+struct PerItemOutputEditor: View {
+    let itemIndex: Int
+    @Binding var items: [QueueItem]
+    @Binding var globalOutput: OutputSettings
+    var useCustomTheme: Bool
+    var themeType: String
+
+    @State private var draft: OutputSettings = .init()
+    @State private var fileNameEdited = false
+    @State private var isPriming = true
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text(items[itemIndex].url.lastPathComponent)
+                .font(.headline)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Divider()
+
+            OutputTabForm(
+                settings: $draft,
+                customThemeEnabled: useCustomTheme,
+                themeType: themeType,
+                colorScheme: (useCustomTheme && themeType.lowercased().contains("dark")) ? .dark :
+                             (useCustomTheme && themeType.lowercased().contains("light")) ? .light :
+                             (NSApp.effectiveAppearance.name == .darkAqua ? .dark : .light),
+                onFileNameEdited: {
+                    fileNameEdited = true
+                    items[itemIndex].fileNameEdited = true
+                    markOverridden()
+                }
+            )
+            .frame(width: 600)
+
+            Spacer(minLength: 0)
+
+            HStack {
+                Button("Reset to defaults") {
+                    items[itemIndex].perItemOutput = nil
+                    items[itemIndex].fileNameEdited = false
+                    draft = globalOutput
+                    draft.fileName = "\(globalOutput.fileName)-\(itemIndex + 1)"
+                    items[itemIndex].hasOverrides = false
+                    QueueStore.save(items)
+                }
+                Spacer()
+                Button("Close") { NSApp.keyWindow?.close() }
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(20)
+        .onAppear {
+            draft = items[itemIndex].perItemOutput ?? globalOutput
+            fileNameEdited = items[itemIndex].fileNameEdited
+            if !fileNameEdited {
+                draft.fileName = "\(globalOutput.fileName)-\(itemIndex + 1)"
+            }
+            isPriming = false
+        }
+        .onChange(of: draft) { _ in
+            if !isPriming { markOverridden() }
+        }
+    }
+
+    private func markOverridden() {
+        var compare = draft
+        if !fileNameEdited { compare.fileName = globalOutput.fileName }
+        if compare == globalOutput && fileNameEdited == false {
+            items[itemIndex].perItemOutput = nil
+            items[itemIndex].hasOverrides = false
+        } else {
+            items[itemIndex].perItemOutput = draft
+            items[itemIndex].hasOverrides = true
+        }
+        QueueStore.save(items)
+    }
+}
+
+// MARK: - Reusable Output Tab for queue
+
+struct OutputTabForm: View {
+    @Binding var settings: OutputSettings
+    var customThemeEnabled: Bool
+    var themeType: String
+    var colorScheme: ColorScheme
+    var onFileNameEdited: (() -> Void)? = nil
+
+    @State private var isOptionKeyPressed = false
+
+    @State private var isHoveringResponseRateToggle = false
+    @State private var responseRateToggleFrame: CGRect = .zero
+
+    @State private var isHoveringReportCSVToggle = false
+    @State private var reportCSVToggleFrame: CGRect = .zero
+    @State private var isHoveringStatisticsGeneral = false
+    @State private var isHoveringStatisticsDetailed = false
+    @State private var statisticsGeneralFrame: CGRect = .zero
+    @State private var statisticsDetailedFrame: CGRect = .zero
+
+    @State private var isHoveringExportImage = false
+    @State private var isHoveringExportInteractive = false
+    @State private var isHoveringExportAnimated = false
+    @State private var exportImageFrame: CGRect = .zero
+    @State private var exportInteractiveFrame: CGRect = .zero
+    @State private var exportAnimatedFrame: CGRect = .zero
+
+    @State private var isHoveringGraphColor = false
+    @State private var graphColorFrame: CGRect = .zero
+
+    @State private var isHoveringGraphScaleSlider = false
+    @State private var graphScaleSliderFrame: CGRect = .zero
+
+    @State private var isHoveringRenderOneSideOnly = false
+    @State private var renderOneSideOnlyFrame: CGRect = .zero
+
+    @State private var isHoveringTearingDetectionToggle = false
+    @State private var tearingDetectionToggleFrame: CGRect = .zero
+
+    @State private var isHoveringFileName = false
+    @State private var fileNameFrame: CGRect = .zero
+    
+    @State private var isHoveringCsvFrametimes = false
+    @State private var csvFrametimesFrame: CGRect = .zero
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            VStack(alignment: .leading, spacing: 22) {
+                GeometryReader { geo in
+                    HStack {
+                        Text("File Name").font(.system(size: 13))
+                        TextField("Output", text: $settings.fileName)
+                            .textFieldStyle(.roundedBorder)
+                            .frame(width: 150)
+                            .onChange(of: settings.fileName) { _ in onFileNameEdited?() }
+                            .onSubmit {
+                                if settings.fileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    settings.fileName = "Output"
+                                }
+                            }
+                    }
+                    .onHover { hovering in
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            isHoveringFileName = hovering
+                            if hovering { fileNameFrame = geo.frame(in: .global) }
+                        }
+                    }
+                }
+                .frame(height: 24)
+
+                GeometryReader { geo in
+                    Toggle("Enable 250 ms Response Rate", isOn: $settings.enable250ms)
+                        .onHover { hovering in
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                isHoveringResponseRateToggle = hovering
+                                if hovering { responseRateToggleFrame = geo.frame(in: .global); blurFirstResponder()}
+                            }
+                        }
+                }
+                .frame(height: 20)
+
+                if settings.enable250ms {
+                    Text("⚠️ WARNING: 250 ms response rate may produce inaccurate FPS reports when analyzing locked-framerate footage.")
+                        .font(.caption)
+                        .foregroundColor(customThemeEnabled && themeType.lowercased().contains("miku") ? Color(red: 1.0, green: 0.9, blue: 0.4) : .orange)
+                }
+
+                GeometryReader { geo in
+                    Toggle("Export CSV Frametimes", isOn: $settings.exportCsvFrametimes)
+                        .onHover { hovering in
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                isHoveringCsvFrametimes = hovering
+                                if hovering { csvFrametimesFrame = geo.frame(in: .global); blurFirstResponder() }
+                            }
+                        }
+                }
+                .frame(height: 20)
+
+                GeometryReader { geo in
+                    Toggle("Export CSV Summary", isOn: $settings.exportCsvSummary)
+                        .onHover { hovering in
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                isHoveringReportCSVToggle = hovering
+                                if hovering { reportCSVToggleFrame = geo.frame(in: .global); blurFirstResponder() }
+                            }
+                        }
+                }
+                .frame(height: 20)
+
+                if settings.exportCsvSummary {
+                    SegmentedTwoOptions(
+                        leftTitle: "General",
+                        rightTitle: "Detailed",
+                        selectedLeft: settings.csvSummaryMode == .general,
+                        onLeft: { settings.csvSummaryMode = .general },
+                        onRight: { settings.csvSummaryMode = .detailed },
+                        customThemeEnabled: customThemeEnabled,
+                        themeType: themeType,
+                        colorScheme: colorScheme,
+                        onLeftHover: { isHoveringStatisticsGeneral = $0 },
+                        onRightHover: { isHoveringStatisticsDetailed = $0 },
+                        leftFrame: $statisticsGeneralFrame,
+                        rightFrame: $statisticsDetailedFrame
+                    )
+                }
+
+                GeometryReader { geo in
+                    Toggle("Export Graph (Image)", isOn: $settings.exportImage)
+                        .onHover { hovering in
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                isHoveringExportImage = hovering
+                                if hovering { exportImageFrame = geo.frame(in: .global); blurFirstResponder() }
+                            }
+                        }
+                }
+                .frame(height: 20)
+
+                GeometryReader { geo in
+                    Toggle("Export Graph (Interactive)", isOn: $settings.exportInteractive)
+                        .onHover { hovering in
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                isHoveringExportInteractive = hovering
+                                if hovering { isHoveringExportAnimated = false; }
+                                if hovering { exportInteractiveFrame = geo.frame(in: .global); blurFirstResponder() }
+                            }
+                        }
+                }
+                .frame(height: 20)
+
+                GeometryReader { geo in
+                    Toggle("Export Animated Overlay", isOn: $settings.exportAnimated)
+                        .onHover { hovering in
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                isHoveringExportAnimated = hovering
+                                if hovering { isHoveringExportInteractive = false }
+                                if hovering { exportAnimatedFrame = geo.frame(in: .global); blurFirstResponder() }
+                            }
+                        }
+                }
+                .frame(height: 20)
+
+                if settings.exportImage || settings.exportInteractive || settings.exportAnimated {
+                    GeometryReader { geo in
+                        HStack(spacing: 8) {
+                            Text("Exported Graph Colour   ").font(.system(size: 13))
+                                .onHover { hovering in
+                                    withAnimation(.easeInOut(duration: 0.25)) {
+                                        isHoveringGraphColor = hovering
+                                        if hovering { graphColorFrame = geo.frame(in: .global); blurFirstResponder() }
+                                    }
+                                }
+                            ColorPicker("", selection: Binding<Color>(
+                                get: { ColorSelect.fromHex(settings.graphColorHex) ?? .green },
+                                set: { newColor in settings.graphColorHex = ColorSelect.toHex(newColor) ?? "#33B170FF" }
+                            ), supportsOpacity: true)
+                            .labelsHidden().frame(width: 24, height: 24)
+                            .background(RoundedRectangle(cornerRadius: 4).stroke(Color.gray.opacity(0.4)))
+                        }
+                    }
+                    .frame(height: 24)
+                }
+
+                if settings.exportAnimated {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Animated Overlay Size").font(.system(size: 13))
+                        HStack {
+                            GeometryReader { geo in
+                                Slider(value: $settings.overlayScale, in: 50...150)
+                                    .onHover { hovering in
+                                        withAnimation(.easeInOut(duration: 0.25)) {
+                                            isHoveringGraphScaleSlider = hovering
+                                            if hovering { graphScaleSliderFrame = geo.frame(in: .global); blurFirstResponder() }
+                                        }
+                                    }
+                            }
+                            .frame(height: 20)
+                            Text("\(Int(settings.overlayScale))").frame(width: 35, alignment: .trailing).font(.system(size: 13))
+                        }
+                    }
+                    GeometryReader { geo in
+                        HStack(spacing: 8) {
+                            Toggle(isOn: $settings.renderOneSideOnly) {
+                                Text("Render overlay on half of the frame").font(.system(size: 13))
+                            }
+                            .onHover { hovering in
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    isHoveringRenderOneSideOnly = hovering
+                                    if hovering { renderOneSideOnlyFrame = geo.frame(in: .global); blurFirstResponder() }
+                                }
+                            }
+                            Picker("", selection: $settings.overlayPosition) {
+                                Text("Left").tag(OutputSettings.OverlaySide.left)
+                                Text("Middle").tag(OutputSettings.OverlaySide.middle)
+                                Text("Right").tag(OutputSettings.OverlaySide.right)
+                            }
+                            .frame(width: 90).pickerStyle(MenuPickerStyle())
+                            .disabled(!settings.renderOneSideOnly)
+                        }
+                    }
+                    .frame(height: 24)
+                }
+
+                if settings.tearingDetection || isOptionKeyPressed {
+                    GeometryReader { geo in
+                        Toggle("Tearing Detection (Experimental)", isOn: $settings.tearingDetection)
+                            .onHover { hovering in
+                                withAnimation(.easeInOut(duration: 0.25)) {
+                                    isHoveringTearingDetectionToggle = hovering
+                                    if hovering { tearingDetectionToggleFrame = geo.frame(in: .global); blurFirstResponder() }
+                                }
+                            }
+                    }
+                    .frame(height: 20)
+                }
+            }
+            .padding()
+            .onAppear {
+                NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { event in
+                    isOptionKeyPressed = event.modifierFlags.contains(.option)
+                    return event
+                }
+            }
+
+            tooltipsOverlay
+        }
+    }
+
+    private var tooltipsOverlay: some View {
+        ZStack {
+            if isHoveringFileName {
+                    TooltipText(
+                        "Determines the prefix of all output files names",
+                        frame: fileNameFrame,
+                        customThemeEnabled: customThemeEnabled,
+                        themeType: themeType,
+                        xOffset: 256, yOffset: 60
+                    )
+            }
+            if isHoveringResponseRateToggle {
+                TooltipText(
+                    "Default response rate is 1000 ms. Enabling 250 ms increases precision but reduces accuracy, and is not recommended when analyzing locked-framerate footage.",
+                    frame: responseRateToggleFrame,
+                    customThemeEnabled: customThemeEnabled,
+                    themeType: themeType,
+                    xOffset: 236, yOffset: 60
+                )
+            }
+            if isHoveringReportCSVToggle {
+                TooltipText(
+                    "Exports a CSV file with test summary data (i. e. min FPS, avg FPS, max FPS).",
+                    frame: reportCSVToggleFrame,
+                    customThemeEnabled: customThemeEnabled,
+                    themeType: themeType,
+                    xOffset: 196, yOffset: 60
+                )
+            }
+            if isHoveringCsvFrametimes {
+                TooltipText(
+                    "Exports CSV file with frametimes of every frame",
+                    frame: csvFrametimesFrame,
+                    customThemeEnabled: customThemeEnabled,
+                    themeType: themeType,
+                    xOffset: 196, yOffset: 60
+                )
+            }
+            if isHoveringStatisticsGeneral {
+                TooltipText(
+                    "Reports min FPS, avg FPS, and max FPS.",
+                    frame: statisticsGeneralFrame,
+                    customThemeEnabled: customThemeEnabled,
+                    themeType: themeType,
+                    xOffset: 25, yOffset: 30
+                )
+            }
+            if isHoveringStatisticsDetailed {
+                TooltipText(
+                    "Reports min FPS, avg FPS, max FPS, longest frame duration, % of frames matching it, 1% slowest frames, and their corresponding FPS.",
+                    frame: statisticsDetailedFrame,
+                    customThemeEnabled: customThemeEnabled,
+                    themeType: themeType,
+                    xOffset: 30, yOffset: 30
+                )
+            }
+            if isHoveringExportImage {
+                TooltipImagePreview(
+                    title: "Exports a high resolution image with FPS and Frametime graphs.",
+                    imageName: "Image",
+                    frame: exportImageFrame,
+                    width: 320, height: 269,
+                    offsetX: 20, offsetY: 120,
+                    customThemeEnabled: customThemeEnabled,
+                    themeType: themeType
+                )
+            }
+            if isHoveringExportInteractive && !isHoveringExportAnimated {
+                TooltipGIFPreview(
+                    title: "Exports an interactive HTML graph of FPS and Frametime.",
+                    gifName: "Interactive",
+                    frame: exportInteractiveFrame,
+                    height: 320, offsetX: 35, offsetY: 110,
+                    customThemeEnabled: customThemeEnabled,
+                    themeType: themeType
+                )
+            }
+            if isHoveringExportAnimated {
+                TooltipGIFPreview(
+                    title: "Exports an original video with Frametime and FPS graphs as overlays.",
+                    gifName: "Animated_Overlay",
+                    frame: exportAnimatedFrame,
+                    height: 220, offsetX: 30, offsetY: 70,
+                    customThemeEnabled: customThemeEnabled,
+                    themeType: themeType
+                )
+            }
+            if isHoveringGraphColor {
+                TooltipText(
+                    "Choose colour of the graph",
+                    frame: graphColorFrame,
+                    customThemeEnabled: customThemeEnabled,
+                    themeType: themeType,
+                    xOffset: 236, yOffset: 60
+                )
+            }
+            if isHoveringGraphScaleSlider {
+                TooltipScalePreview(
+                    text: "Controls the size of the Animated Overlay",
+                    imageForScale: getScalingImage(for: Int(settings.overlayScale)),
+                    frame: graphScaleSliderFrame,
+                    customThemeEnabled: customThemeEnabled,
+                    themeType: themeType,
+                    offsetX: 110, offsetY: 30
+                )
+            }
+            if isHoveringRenderOneSideOnly {
+                TooltipOverlaySide(
+                    overlayPosition: settings.overlayPosition.rawValue,
+                    frame: renderOneSideOnlyFrame,
+                    customThemeEnabled: customThemeEnabled,
+                    themeType: themeType,
+                    offsetX: 110, offsetY: 35
+                )
+            }
+            if isHoveringTearingDetectionToggle {
+                TooltipText(
+                    "Tearing detection predicts the original framerate in recordings with screen tearing. This feature is EXPERIMENTAL and known to cause false positives or negatives. Use it mainly for testing or entertainment purposes.",
+                    frame: tearingDetectionToggleFrame,
+                    customThemeEnabled: customThemeEnabled,
+                    themeType: themeType,
+                    xOffset: 245, yOffset: 60
+                )
+            }
+        }
+    }
+}
+
+
 // MARK: - Drag & Drop Reorder
 
 private struct QueueDropDelegate: DropDelegate {
-    let item: QueuePopup.QueueItem
-    @Binding var items: [QueuePopup.QueueItem]
-    @Binding var draggingItem: QueuePopup.QueueItem?
+    let item: QueueItem
+        @Binding var items: [QueueItem]
+        @Binding var draggingItem: QueueItem?
 
     func validateDrop(info: DropInfo) -> Bool { true }
 
     func dropEntered(info: DropInfo) {
         guard let dragging = draggingItem, dragging != item,
               let from = items.firstIndex(of: dragging),
-              let to = items.firstIndex(of: item)
-        else { return }
+              let to   = items.firstIndex(of: item) else { return }
 
         if items[to].id != dragging.id {
-            withAnimation(.easeInOut(duration: 0.15)) {
-                items.move(fromOffsets: IndexSet(integer: from), toOffset: (to > from) ? to + 1 : to)
-            }
+            items.move(fromOffsets: IndexSet(integer: from),
+                       toOffset: (to > from) ? to + 1 : to)
         }
     }
 
-    func performDrop(info: DropInfo) -> Bool {
-        draggingItem = nil
-        return true
+
+
+        func performDrop(info: DropInfo) -> Bool {
+            draggingItem = nil
+            // Update default names after reordering
+            for (idx, _) in items.enumerated() {
+                if items[idx].fileNameEdited == false, var o = items[idx].perItemOutput {
+                    items[idx].perItemOutput = o
+                }
+            }
+            QueueStore.save(items)
+            return true
+
     }
 }
 
 // MARK: - QueuePopup
 struct QueuePopup: View {
-    struct QueueItem: Identifiable, Equatable {
-        let id = UUID()
-        let url: URL
-    }
+    
+    @Binding var items: [QueueItem]
+    let isRunning: Bool
+    
     
     var customThemeEnabled: Bool
-        var themeType: String
+    var themeType: String
+    
+    @Binding var globalOutput: OutputSettings
 
-        private var footerColor: Color {
+    private var footerColor: Color {
             (customThemeEnabled && (themeType == "Hatsune Miku" || themeType == "Megurine Luka")) ? .black : .white
         }
+    
+    @State private var editingItem: QueueItem? = nil
 
-    @State private var items: [QueueItem] = []
     @State private var draggingItem: QueueItem?
+    
+    @State private var isDropTarget = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -656,6 +1179,8 @@ struct QueuePopup: View {
                     }
                 }
                 .buttonStyle(.bordered)
+                .disabled(isRunning)
+                .opacity(isRunning ? 0.6 : 1.0)
             }
 
             // List
@@ -668,10 +1193,69 @@ struct QueuePopup: View {
                             .foregroundColor(.secondary)
                             .padding(12)
                     )
-                    .frame(height: 180)
+                    .frame(height: 260)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                    )
+                    .disabled(isRunning)
+                    .onDrop(of: [UTType.fileURL, .movie, .audiovisualContent, .url],
+                            isTargeted: $isDropTarget) { providers in
+
+                        let allowedExt: Set<String> = ["mov","mp4","m4v","avi","mkv","webm"]
+
+                        func appendURL(_ url: URL) {
+                            guard url.isFileURL, allowedExt.contains(url.pathExtension.lowercased()) else { return }
+                            DispatchQueue.main.async {
+                                items.append(QueueItem(url: url))
+                                QueueStore.save(items)
+                            }
+                        }
+
+                        var accepted = false
+
+                        for p in providers {
+                            // 1) Direct file URL
+                            if p.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                                accepted = true
+                                p.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                                    if let url = item as? URL { appendURL(url) }
+                                }
+                                continue
+                            }
+
+                            // 2) Movie file (e.g. QuickTime .mov)
+                            if p.hasItemConformingToTypeIdentifier(UTType.movie.identifier) {
+                                accepted = true
+                                p.loadFileRepresentation(forTypeIdentifier: UTType.movie.identifier) { url, _ in
+                                    if let url = url { appendURL(url) }
+                                }
+                                continue
+                            }
+
+                            // 3) Generic audiovisual content
+                            if p.hasItemConformingToTypeIdentifier(UTType.audiovisualContent.identifier) {
+                                accepted = true
+                                p.loadFileRepresentation(forTypeIdentifier: UTType.audiovisualContent.identifier) { url, _ in
+                                    if let url = url { appendURL(url) }
+                                }
+                                continue
+                            }
+
+                            // 4) Fallback: plain URL (sometimes Finder provides public.url)
+                            if p.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
+                                accepted = true
+                                p.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { item, _ in
+                                    if let url = item as? URL, url.isFileURL { appendURL(url) }
+                                }
+                            }
+                        }
+
+                        return accepted
+                    }
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(isDropTarget ? Color.accentColor.opacity(0.6) : .clear, lineWidth: 2)
                     )
             } else {
                 ScrollView {
@@ -689,8 +1273,72 @@ struct QueuePopup: View {
                                 ))
                         }
                     }
+                    .animation(.easeInOut(duration: 0.12), value: items)
                     .padding(.vertical, 4)
                 }
+                .onDrop(of: [UTType.fileURL, .movie, .audiovisualContent, .url],
+                        isTargeted: $isDropTarget) { providers in
+
+                    let allowedExt: Set<String> = ["mov","mp4","m4v","avi","mkv","webm"]
+
+                    func appendURL(_ url: URL) {
+                        guard url.isFileURL, allowedExt.contains(url.pathExtension.lowercased()) else { return }
+                        DispatchQueue.main.async {
+                            items.append(QueueItem(url: url))   // your model
+                            QueueStore.save(items)             // if you persist
+                        }
+                    }
+
+                    var accepted = false
+
+                    for p in providers {
+                        // 1) Direct file URL
+                        if p.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                            accepted = true
+                            p.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                                if let url = item as? URL { appendURL(url) }
+                            }
+                            continue
+                        }
+
+                        // 2) Movie file (e.g. QuickTime .mov)
+                        if p.hasItemConformingToTypeIdentifier(UTType.movie.identifier) {
+                            accepted = true
+                            p.loadFileRepresentation(forTypeIdentifier: UTType.movie.identifier) { url, _ in
+                                if let url = url { appendURL(url) }
+                            }
+                            continue
+                        }
+
+                        // 3) Generic audiovisual content
+                        if p.hasItemConformingToTypeIdentifier(UTType.audiovisualContent.identifier) {
+                            accepted = true
+                            p.loadFileRepresentation(forTypeIdentifier: UTType.audiovisualContent.identifier) { url, _ in
+                                if let url = url { appendURL(url) }
+                            }
+                            continue
+                        }
+
+                        // 4) Fallback: plain URL (sometimes Finder provides public.url)
+                        if p.hasItemConformingToTypeIdentifier(UTType.url.identifier) {
+                            accepted = true
+                            p.loadItem(forTypeIdentifier: UTType.url.identifier, options: nil) { item, _ in
+                                if let url = item as? URL, url.isFileURL { appendURL(url) }
+                            }
+                        }
+                    }
+
+                    return accepted
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(isDropTarget ? Color.accentColor.opacity(0.6) : .clear, lineWidth: 2)
+                )
+                .transaction { tx in
+                    if draggingItem != nil { tx.disablesAnimations = true }
+                }
+
+                .disabled(isRunning)
                 .frame(minHeight: 160, maxHeight: 260)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
@@ -703,7 +1351,7 @@ struct QueuePopup: View {
                 
                 
             }
-            Text("v0.3.1-Alpha")
+            Text("v0.4.0-Alpha")
               .font(.caption2)
               .foregroundStyle(.secondary)
         }
@@ -731,6 +1379,7 @@ struct QueuePopup: View {
                     openItemSettings(item)
                 } label: {
                     Image(systemName: "gearshape")
+                        .foregroundColor(item.hasOverrides ? .red : .primary)
                 }
                 .buttonStyle(.borderless)
 
@@ -741,6 +1390,8 @@ struct QueuePopup: View {
                 }
                 .buttonStyle(.borderless)
             }
+            .disabled(isRunning)
+            .opacity(isRunning ? 0.6 : 1.0)
             
         }
         .padding(.horizontal, 10)
@@ -786,9 +1437,151 @@ struct QueuePopup: View {
     }
 
     private func openItemSettings(_ item: QueueItem) {
-        // Placeholder to wire individual settings
+        guard let idx = items.firstIndex(of: item) else { return }
+        let controller = PerItemSettingsWindowController(
+            itemIndex: idx,
+            itemsBinding: $items,
+            globalOutputBinding: $globalOutput,
+            useCustomTheme: customThemeEnabled,
+            themeType: themeType
+        )
+        controller.showWindow(nil)
+    }
+
+    
+    
+}
+
+
+// MARK: - Queue model
+struct QueueItem: Identifiable, Codable, Equatable {
+    let id: UUID
+    var url: URL
+    var perItemOutput: OutputSettings?   // nil = follow main Output settings
+    var fileNameEdited: Bool             // User manual override file name
+    var hasOverrides: Bool               // any per-item overrides
+    var position: Int = 0
+
+    init(url: URL) {
+        self.id = UUID()
+        self.url = url
+        self.perItemOutput = nil
+        self.fileNameEdited = false
+        self.hasOverrides = false
     }
 }
+
+// MARK: - Per-item Output Settings Window (match app theme)
+
+fileprivate let SettingsContentWidth: CGFloat = 600
+final class PerItemSettingsWindowController: NSWindowController {
+    private var hosting: NSHostingController<AnyView>!
+
+    init(itemIndex: Int,
+         itemsBinding: Binding<[QueueItem]>,
+         globalOutputBinding: Binding<OutputSettings>,
+         useCustomTheme: Bool,
+         themeType: String) {
+
+        let editor = PerItemOutputEditor(
+            itemIndex: itemIndex,
+            items: itemsBinding,
+            globalOutput: globalOutputBinding,
+            useCustomTheme: useCustomTheme,
+            themeType: themeType
+        )
+
+        let rootView: AnyView = useCustomTheme
+        ? AnyView(editor.preferredColorScheme(.dark))
+        : AnyView(editor)
+
+        hosting = NSHostingController(rootView: rootView)
+
+        let initialHeight: CGFloat = 700
+        let w = NSWindow(
+            contentRect: NSRect(x: 0, y: 0,
+                                width: Int(SettingsContentWidth),
+                                height: Int(initialHeight)),
+            styleMask: [.titled, .closable, .resizable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        w.title = "Item Output Settings"
+        w.isReleasedWhenClosed = false
+        w.contentViewController = hosting
+        w.setContentSize(NSSize(width: SettingsContentWidth, height: initialHeight))
+        w.minSize = NSSize(width: SettingsContentWidth, height: 560)
+
+        let themeBG: NSColor = {
+            guard useCustomTheme else { return .windowBackgroundColor }
+            switch themeType {
+            case AppSettings.Theme.miku.rawValue:
+                return NSColor(srgbRed: 94/255, green: 150/255, blue: 194/255, alpha: 1)
+            case AppSettings.Theme.luka.rawValue:
+                return NSColor(srgbRed: 181/255, green: 106/255, blue: 131/255, alpha: 1)
+            default:
+                return .windowBackgroundColor
+            }
+        }()
+        w.isOpaque = true
+        w.backgroundColor = themeBG
+        if let cv = w.contentView {
+            cv.wantsLayer = true
+            cv.layer?.backgroundColor = themeBG.cgColor
+        }
+        w.appearance = useCustomTheme ? NSAppearance(named: .darkAqua) : nil
+        w.center()
+        super.init(window: w)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+
+
+// MARK: - Cache in /Library/Caches
+enum QueueStore {
+    private static let fileURL: URL = {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("render-queue.json")
+    }()
+
+    private static var didPurgeThisRun = false
+    /// Removes the cache once per app run so the app always launches empty.
+    static func purgeIfFirstLaunch() -> Bool {
+        guard !didPurgeThisRun else { return false }
+        didPurgeThisRun = true
+        try? FileManager.default.removeItem(at: fileURL)
+        return true
+    }
+
+    static func load() -> [QueueItem] {
+        guard let data = try? Data(contentsOf: fileURL),
+              let decoded = try? JSONDecoder().decode([QueueItem].self, from: data)
+        else { return [] }
+        return normalize(decoded)
+    }
+
+    static func save(_ items: [QueueItem]) {
+        let items = normalize(items)
+        if items.isEmpty {
+            try? FileManager.default.removeItem(at: fileURL)
+            return
+        }
+        if let data = try? JSONEncoder().encode(items) {
+            try? data.write(to: fileURL, options: .atomic)
+        }
+    }
+
+    @discardableResult
+    private static func normalize(_ items: [QueueItem]) -> [QueueItem] {
+        var out = items
+        for i in out.indices { out[i].position = i }
+        return out
+    }
+}
+
+
 
 // MARK: - SettingsPopup with Tabs
 
@@ -848,6 +1641,15 @@ struct SettingsPopup: View {
     @State private var isHoveringMeasureTimeToggle = false
     @State private var measureTimeToggleFrame: CGRect = .zero
     
+    @State private var isHoveringFileName = false
+    @State private var fileNameFrame: CGRect = .zero
+
+    @State private var isHoveringCsvFrametimes = false
+    @State private var csvFrametimesFrame: CGRect = .zero
+    
+    let isRunning: Bool
+    
+    
     var body: some View {
         ZStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 22) {
@@ -870,7 +1672,7 @@ struct SettingsPopup: View {
                     }
                 }
 
-                Text("v0.3.1-Alpha")
+                Text("v0.4.0-Alpha")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -888,13 +1690,36 @@ struct SettingsPopup: View {
 
     // Output Tab
     private var outputTab: some View {
+        
         VStack(alignment: .leading, spacing: 22) {
+            
+            GeometryReader { geo in
+                HStack {
+                    Text("File Name").font(.system(size: 13))
+                    TextField("Output", text: $config.output.fileName)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 150)
+                        .onSubmit {
+                            if config.output.fileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                config.output.fileName = "Output"
+                            }
+                        }
+                }
+                .onHover { hovering in
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        isHoveringFileName = hovering
+                        if hovering { fileNameFrame = geo.frame(in: .global) }
+                    }
+                }
+            }
+            .frame(height: 24)
+            
             GeometryReader { geo in
                 Toggle("Enable 250 ms Response Rate", isOn: $config.output.enable250ms)
                     .onHover { hovering in
                         withAnimation(.easeInOut(duration: 0.25)) {
                             isHoveringResponseRateToggle = hovering
-                            if hovering { responseRateToggleFrame = geo.frame(in: .global) }
+                            if hovering { responseRateToggleFrame = geo.frame(in: .global); blurFirstResponder() }
                         }
                     }
             }
@@ -907,11 +1732,22 @@ struct SettingsPopup: View {
             }
 
             GeometryReader { geo in
+                Toggle("Export CSV Frametimes", isOn: $config.output.exportCsvFrametimes)
+                    .onHover { hovering in
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            isHoveringCsvFrametimes = hovering
+                            if hovering { csvFrametimesFrame = geo.frame(in: .global); blurFirstResponder() }
+                        }
+                    }
+            }
+            .frame(height: 20)
+            
+            GeometryReader { geo in
                 Toggle("Export CSV Summary", isOn: $config.output.exportCsvSummary)
                     .onHover { hovering in
                         withAnimation(.easeInOut(duration: 0.25)) {
                             isHoveringReportCSVToggle = hovering
-                            if hovering { reportCSVToggleFrame = geo.frame(in: .global) }
+                            if hovering { reportCSVToggleFrame = geo.frame(in: .global); blurFirstResponder() }
                         }
                     }
             }
@@ -940,7 +1776,7 @@ struct SettingsPopup: View {
                     .onHover { hovering in
                         withAnimation(.easeInOut(duration: 0.25)) {
                             isHoveringExportImage = hovering
-                            if hovering { exportImageFrame = geo.frame(in: .global) }
+                            if hovering { exportImageFrame = geo.frame(in: .global); blurFirstResponder() }
                         }
                     }
             }.frame(height: 20)
@@ -951,8 +1787,8 @@ struct SettingsPopup: View {
                     .onHover { hovering in
                         withAnimation(.easeInOut(duration: 0.25)) {
                             isHoveringExportInteractive = hovering
-                            if hovering { isHoveringExportAnimated = false }   // <-- make exclusive
-                            if hovering { exportInteractiveFrame = geo.frame(in: .global) }
+                            if hovering { isHoveringExportAnimated = false }
+                            if hovering { exportInteractiveFrame = geo.frame(in: .global); blurFirstResponder() }
                         }
                     }
             }
@@ -964,8 +1800,8 @@ struct SettingsPopup: View {
                     .onHover { hovering in
                         withAnimation(.easeInOut(duration: 0.25)) {
                             isHoveringExportAnimated = hovering
-                            if hovering { isHoveringExportInteractive = false } // <-- make exclusive
-                            if hovering { exportAnimatedFrame = geo.frame(in: .global) }
+                            if hovering { isHoveringExportInteractive = false }
+                            if hovering { exportAnimatedFrame = geo.frame(in: .global); blurFirstResponder() }
                         }
                     }
             }
@@ -978,7 +1814,7 @@ struct SettingsPopup: View {
                             .onHover { hovering in
                                 withAnimation(.easeInOut(duration: 0.25)) {
                                     isHoveringGraphColor = hovering
-                                    if hovering { graphColorFrame = geo.frame(in: .global) }
+                                    if hovering { graphColorFrame = geo.frame(in: .global); blurFirstResponder() }
                                 }
                             }
                         ColorPicker("", selection: Binding<Color>(
@@ -1000,7 +1836,7 @@ struct SettingsPopup: View {
                                 .onHover { hovering in
                                     withAnimation(.easeInOut(duration: 0.25)) {
                                         isHoveringGraphScaleSlider = hovering
-                                        if hovering { graphScaleSliderFrame = geo.frame(in: .global) }
+                                        if hovering { graphScaleSliderFrame = geo.frame(in: .global); blurFirstResponder() }
                                     }
                                 }
                         }.frame(height: 20)
@@ -1015,7 +1851,7 @@ struct SettingsPopup: View {
                         .onHover { hovering in
                             withAnimation(.easeInOut(duration: 0.25)) {
                                 isHoveringRenderOneSideOnly = hovering
-                                if hovering { renderOneSideOnlyFrame = geo.frame(in: .global) }
+                                if hovering { renderOneSideOnlyFrame = geo.frame(in: .global); blurFirstResponder() }
                             }
                         }
                         Picker("", selection: $config.output.overlayPosition) {
@@ -1035,12 +1871,14 @@ struct SettingsPopup: View {
                         .onHover { hovering in
                             withAnimation(.easeInOut(duration: 0.25)) {
                                 isHoveringTearingDetectionToggle = hovering
-                                if hovering { tearingDetectionToggleFrame = geo.frame(in: .global) }
+                                if hovering { tearingDetectionToggleFrame = geo.frame(in: .global); blurFirstResponder() }
                             }
                         }
                 }.frame(height: 20)
             }
         }
+        .disabled(isRunning)
+        .opacity(isRunning ? 0.6 : 1.0)
     }
 
     // Performance Tab
@@ -1051,7 +1889,7 @@ struct SettingsPopup: View {
                     .onHover { hovering in
                         withAnimation(.easeInOut(duration: 0.25)) {
                             isHoveringMultithreadingToggle = hovering
-                            if hovering { multithreadingToggleFrame = geo.frame(in: .global) }
+                            if hovering { multithreadingToggleFrame = geo.frame(in: .global); blurFirstResponder() }
                         }
                     }
             }.frame(height: 20)
@@ -1071,7 +1909,7 @@ struct SettingsPopup: View {
                                 .onHover { hovering in
                                     withAnimation(.easeInOut(duration: 0.25)) {
                                         isHoveringChunkSlider = hovering
-                                        if hovering { chunkSliderFrame = geo.frame(in: .global) }
+                                        if hovering { chunkSliderFrame = geo.frame(in: .global); blurFirstResponder() }
                                     }
                                 }
                         }.frame(height: 20)
@@ -1092,12 +1930,14 @@ struct SettingsPopup: View {
                     .onHover { hovering in
                         withAnimation(.easeInOut(duration: 0.25)) {
                             isHoveringCodec = hovering
-                            if hovering { codecFrame = geo.frame(in: .global) }
+                            if hovering { codecFrame = geo.frame(in: .global); blurFirstResponder() }
                         }
                     }
                 }.frame(height: 28)
             }
         }
+        .disabled(isRunning)
+        .opacity(isRunning ? 0.6 : 1.0)
     }
 
     // App Tab
@@ -1108,7 +1948,7 @@ struct SettingsPopup: View {
                     .onHover { hovering in
                         withAnimation(.easeInOut(duration: 0.25)) {
                             isHoveringMeasureTimeToggle = hovering
-                            if hovering { measureTimeToggleFrame = geo.frame(in: .global) }
+                            if hovering { measureTimeToggleFrame = geo.frame(in: .global); blurFirstResponder() }
                         }
                     }
             }.frame(height: 20)
@@ -1118,7 +1958,7 @@ struct SettingsPopup: View {
                     .onHover { hovering in
                         withAnimation(.easeInOut(duration: 0.25)) {
                             isHoveringCustomThemeToggle = hovering
-                            if hovering { customThemeToggleFrame = geo.frame(in: .global) }
+                            if hovering { customThemeToggleFrame = geo.frame(in: .global); blurFirstResponder() }
                         }
                     }
             }.frame(height: 20)
@@ -1136,9 +1976,11 @@ struct SettingsPopup: View {
                 )
             }
         }
+        .disabled(isRunning)
+        .opacity(isRunning ? 0.6 : 1.0)
     }
 
-    // Tooltips overlay (type-erased to avoid ViewBuilder arity/complexity limits)
+    // Tooltips overlay
     private var tooltipsOverlay: some View {
         ZStack {
             ForEach(Array(composeTooltips().enumerated()), id: \.offset) { _, view in
@@ -1150,6 +1992,29 @@ struct SettingsPopup: View {
     // Build the currently active tooltips as an array of AnyView
     private func composeTooltips() -> [AnyView] {
         var out: [AnyView] = []
+        
+        if isHoveringFileName {
+            out.append(AnyView(
+                TooltipText(
+                    "Determines the prefix of all output files names",
+                    frame: fileNameFrame,
+                    customThemeEnabled: config.app.useCustomTheme,
+                    themeType: config.app.theme.rawValue
+                )
+            ))
+        }
+
+        if isHoveringCsvFrametimes {
+            out.append(AnyView(
+                TooltipText(
+                    "Exports CSV file with frametimes of every frame",
+                    frame: csvFrametimesFrame,
+                    customThemeEnabled: config.app.useCustomTheme,
+                    themeType: config.app.theme.rawValue
+                )
+            ))
+        }
+
 
         if isHoveringResponseRateToggle {
             out.append(AnyView(
@@ -1161,6 +2026,7 @@ struct SettingsPopup: View {
                 )
             ))
         }
+        
         if isHoveringReportCSVToggle {
             out.append(AnyView(
                 TooltipText(
@@ -1210,7 +2076,7 @@ struct SettingsPopup: View {
                     title: "Exports an interactive HTML graph of FPS and Frametime.",
                     gifName: "Interactive",
                     frame: exportInteractiveFrame,
-                    height: 320, offsetX: -105,
+                    height: 320, offsetX: -105, offsetY: 0,
                     customThemeEnabled: config.app.useCustomTheme,
                     themeType: config.app.theme.rawValue
                 )
@@ -1221,7 +2087,7 @@ struct SettingsPopup: View {
                     title: "Exports an original video with Frametime and FPS graphs as overlays.",
                     gifName: "Animated_Overlay",
                     frame: exportAnimatedFrame,
-                    height: 220, offsetX: -120,
+                    height: 220, offsetX: -120, offsetY: 0,
                     customThemeEnabled: config.app.useCustomTheme,
                     themeType: config.app.theme.rawValue
                 )
@@ -1244,7 +2110,8 @@ struct SettingsPopup: View {
                     imageForScale: getScalingImage(for: Int(config.output.overlayScale)),
                     frame: graphScaleSliderFrame,
                     customThemeEnabled: config.app.useCustomTheme,
-                    themeType: config.app.theme.rawValue
+                    themeType: config.app.theme.rawValue,
+                    offsetX: 0, offsetY: 0
                 )
             ))
         }
@@ -1254,7 +2121,8 @@ struct SettingsPopup: View {
                     overlayPosition: config.output.overlayPosition.rawValue,
                     frame: renderOneSideOnlyFrame,
                     customThemeEnabled: config.app.useCustomTheme,
-                    themeType: config.app.theme.rawValue
+                    themeType: config.app.theme.rawValue,
+                    offsetX: 0, offsetY: 0
                 )
             ))
         }
@@ -1687,27 +2555,60 @@ struct TooltipText: View {
     var frame: CGRect
     var customThemeEnabled: Bool
     var themeType: String
-    var maxWidth: CGFloat = 260
-    var xOffset: CGFloat = -8
-    var yOffset: CGFloat = -113
+    var maxWidth: CGFloat
+    var xOffset: CGFloat
+    var yOffset: CGFloat
 
-    init(_ text: String, frame: CGRect, customThemeEnabled: Bool, themeType: String, maxWidth: CGFloat = 260, xOffset: CGFloat = -8, yOffset: CGFloat = -113) {
-        self.text = text; self.frame = frame; self.customThemeEnabled = customThemeEnabled; self.themeType = themeType
-        self.maxWidth = maxWidth; self.xOffset = xOffset; self.yOffset = yOffset
+    @State private var measuredSize: CGSize = .zero
+
+    init(_ text: String, frame: CGRect, customThemeEnabled: Bool, themeType: String, maxWidth: CGFloat = 260, xOffset: CGFloat = 8, yOffset: CGFloat = -8) {
+        self.text = text
+        self.frame = frame
+        self.customThemeEnabled = customThemeEnabled
+        self.themeType = themeType
+        self.maxWidth = maxWidth
+        self.xOffset = xOffset
+        self.yOffset = yOffset
+    }
+    init(text: String, frame: CGRect, customThemeEnabled: Bool, themeType: String, maxWidth: CGFloat = 260, xOffset: CGFloat = 8, yOffset: CGFloat = -8) {
+        self.init(text, frame: frame, customThemeEnabled: customThemeEnabled, themeType: themeType, maxWidth: maxWidth, xOffset: xOffset, yOffset: yOffset)
     }
 
     var body: some View {
-        Text(text)
+        let win = tooltipHostWindow()
+        let contentScreen = win?.convertToScreen(win?.contentView?.bounds ?? .zero) ?? .zero
+
+        let localX = frame.minX - contentScreen.minX
+        let localY = frame.minY - contentScreen.minY
+
+        let desiredLeft = localX + xOffset
+        let desiredTop  = localY - measuredSize.height - 36 + yOffset
+
+        let left = max(8, min(desiredLeft, contentScreen.width - measuredSize.width - 8))
+        let top  = desiredTop
+
+        return Text(text)
             .font(.caption)
-            .padding(8)
-            .frame(maxWidth: maxWidth, alignment: .leading)
-            .background(Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType))
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: maxWidth, alignment: .topLeading)
+            .background(
+                Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType)
+                    .overlay(
+                        GeometryReader { geo in
+                            Color.clear
+                                .onAppear { measuredSize = geo.size }
+                                .onChange(of: geo.size) { measuredSize = $0 }
+                        }
+                    )
+            )
             .cornerRadius(8)
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
+            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.35), lineWidth: 1))
             .shadow(radius: 4)
-            .transition(.opacity)
             .zIndex(10)
-            .offset(x: frame.minX + xOffset, y: frame.minY + yOffset)
+            .offset(x: left, y: top)
+            .allowsHitTesting(false)
     }
 }
 
@@ -1718,31 +2619,46 @@ struct TooltipImagePreview: View {
     var width: CGFloat
     var height: CGFloat
     var offsetX: CGFloat
+    var offsetY: CGFloat = 0
     var customThemeEnabled: Bool
     var themeType: String
 
     var body: some View {
-        let popupHeight: CGFloat = height + 40
-        let windowContentFrame = NSApp.mainWindow?.contentView?.frame ?? .zero
-        let popupBottomY = frame.maxY
-        let offsetY: CGFloat = (popupBottomY + popupHeight > windowContentFrame.maxY) ? frame.minY - popupHeight - 145 : frame.minY - 93
+        let win = tooltipHostWindow()
+        let contentScreen = win?.convertToScreen(win?.contentView?.bounds ?? .zero) ?? .zero
+
+        let popupW = width + 20
+        let popupH = height + 40
+
+        let localX = frame.minX - contentScreen.minX
+        let localY = frame.minY - contentScreen.minY
+
+        let desiredLeft = localX + 180 + offsetX
+        let desiredTop  = localY - popupH - 46 + offsetY
+
+        let left = max(8, min(desiredLeft, contentScreen.width - popupW - 8))
+        let top  = desiredTop
 
         return VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.caption)
-            if let imagePath = Bundle.main.path(forResource: imageName, ofType: "png"),
-               let nsImage = NSImage(contentsOfFile: imagePath) {
-                Image(nsImage: nsImage).resizable().scaledToFit().frame(width: width, height: height)
+            if let path = Bundle.main.path(forResource: imageName, ofType: "png"),
+               let nsImage = NSImage(contentsOfFile: path) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(width: width, height: height)
             }
         }
         .padding(8)
-        .frame(maxWidth: width + 20, alignment: .leading)
+        .frame(width: popupW, height: popupH, alignment: .topLeading)
         .background(Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType))
         .cornerRadius(8)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.35), lineWidth: 1))
         .shadow(radius: 4)
-        .transition(.opacity)
         .zIndex(10)
-        .offset(x: frame.minX + offsetX, y: offsetY)
+        .offset(x: left, y: top)
+        .allowsHitTesting(false)
     }
 }
 
@@ -1752,28 +2668,52 @@ struct TooltipGIFPreview: View {
     var frame: CGRect
     var height: CGFloat
     var offsetX: CGFloat
+    var offsetY: CGFloat
     var customThemeEnabled: Bool
     var themeType: String
 
     var body: some View {
-        let popupHeight: CGFloat = height + 40
-        let windowContentFrame = NSApp.mainWindow?.contentView?.frame ?? .zero
-        let popupBottomY = frame.maxY
-        let offsetY: CGFloat = (popupBottomY + popupHeight > windowContentFrame.maxY) ? frame.minY - popupHeight - 145 : frame.minY - 93
+        let win = tooltipHostWindow()
+        let contentScreen = win?.convertToScreen(win?.contentView?.bounds ?? .zero) ?? .zero
 
-        return VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.caption)
-            GIFImage(gifName: gifName).resizable().id(gifName).frame(height: height).clipShape(RoundedRectangle(cornerRadius: 6))
+        let isInteractive = gifName.lowercased().contains("interactive")
+        let contentW: CGFloat = isInteractive ? 300 : 360
+        let contentH: CGFloat = isInteractive ? 300 : 220
+
+        let popupW = contentW
+        let popupH = contentH + 40
+
+        let localX = frame.minX - contentScreen.minX
+        let localY = frame.minY - contentScreen.minY
+
+        let desiredLeft = localX + 180 + offsetX
+        let desiredTop  = localY - popupH - 46 + offsetY
+
+        let left = max(8, min(desiredLeft, contentScreen.width - popupW - 8))
+        let top  = desiredTop
+
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.caption)
+                .bold()
+                .fixedSize(horizontal: false, vertical: true)
+                .multilineTextAlignment(.leading)
+                .lineLimit(nil)
+            GIFImage(gifName: gifName)
+                .resizable()
+                .id(gifName)
+                .frame(width: contentW - 20, height: contentH)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
         }
         .padding(8)
-        .frame(maxWidth: 400, alignment: .leading)
+        .frame(width: popupW, height: popupH, alignment: .topLeading)
         .background(Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType))
         .cornerRadius(8)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.35), lineWidth: 1))
         .shadow(radius: 4)
-        .transition(.opacity)
         .zIndex(10)
-        .offset(x: frame.minX + offsetX, y: offsetY)
+        .offset(x: left, y: top)
+        .allowsHitTesting(false)
     }
 }
 
@@ -1783,29 +2723,47 @@ struct TooltipScalePreview: View {
     var frame: CGRect
     var customThemeEnabled: Bool
     var themeType: String
+    var offsetX: CGFloat
+    var offsetY: CGFloat
 
     var body: some View {
-        let height: CGFloat = 220
-        let popupHeight: CGFloat = height + 40
-        let windowContentFrame = NSApp.mainWindow?.contentView?.frame ?? .zero
-        let popupBottomY = frame.maxY
-        let offsetY: CGFloat = (popupBottomY + popupHeight > windowContentFrame.maxY) ? frame.minY - popupHeight - 145 : frame.minY - 93
+        let win = tooltipHostWindow()
+        let contentScreen = win?.convertToScreen(win?.contentView?.bounds ?? .zero) ?? .zero
+
+        let contentW: CGFloat = 360
+        let contentH: CGFloat = 220
+
+        let popupW = contentW
+        let popupH = contentH + 40
+
+        let localX = frame.minX - contentScreen.minX
+        let localY = frame.minY - contentScreen.minY
+
+        let desiredLeft = localX + 8 + offsetX
+        let desiredTop  = localY - popupH - 46 + offsetY
+
+        let left = max(8, min(desiredLeft, contentScreen.width - popupW - 8))
+        let top  = desiredTop
 
         return VStack(alignment: .leading, spacing: 8) {
-            Text(text).font(.caption)
+            Text(text).font(.caption).bold()
             if let nsImage = imageForScale {
-                Image(nsImage: nsImage).resizable().scaledToFit().frame(height: height).clipShape(RoundedRectangle(cornerRadius: 6))
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: contentW - 20, height: contentH)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
             }
         }
         .padding(8)
-        .frame(maxWidth: 400, alignment: .leading)
+        .frame(width: popupW, height: popupH, alignment: .topLeading)
         .background(Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType))
         .cornerRadius(8)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.35), lineWidth: 1))
         .shadow(radius: 4)
-        .transition(.opacity)
         .zIndex(10)
-        .offset(x: frame.minX - 65, y: offsetY)
+        .offset(x: left, y: top)
+        .allowsHitTesting(false)
     }
 }
 
@@ -1814,31 +2772,50 @@ struct TooltipOverlaySide: View {
     var frame: CGRect
     var customThemeEnabled: Bool
     var themeType: String
+    var offsetX: CGFloat
+    var offsetY: CGFloat
 
     var body: some View {
-        let height: CGFloat = 220
-        let popupHeight: CGFloat = height + 30
-        let windowContentFrame = NSApp.mainWindow?.contentView?.frame ?? .zero
-        let popupBottomY = frame.maxY
-        let offsetY: CGFloat = (popupBottomY + popupHeight > windowContentFrame.maxY) ? frame.minY - popupHeight - 158 : frame.minY - 113
+        let win = tooltipHostWindow()
+        let contentScreen = win?.convertToScreen(win?.contentView?.bounds ?? .zero) ?? .zero
+
+        let contentW: CGFloat = 360
+        let contentH: CGFloat = 220
+
+        let popupW = contentW
+        let popupH = contentH + 50
+
+        let localX = frame.minX - contentScreen.minX
+        let localY = frame.minY - contentScreen.minY
+
+        let desiredLeft = localX + 8 + offsetX
+        let desiredTop  = localY - popupH - 46 + offsetY
+
+        let left = max(8, min(desiredLeft, contentScreen.width - popupW - 8))
+        let top  = desiredTop
 
         return VStack(alignment: .leading, spacing: 8) {
-            Text("Renders overlay on only one side of a frame. Useful for locating the videos with overlays side by side.")
-                .font(.caption).fixedSize(horizontal: false, vertical: true)
+            Text("Renders overlay on one side of the frame. Useful for side-by-side comparisons.")
+                .font(.caption)
+                .fixedSize(horizontal: false, vertical: true)
             if let url = Bundle.main.url(forResource: overlayPosition, withExtension: "png"),
                let nsImage = NSImage(contentsOf: url) {
-                Image(nsImage: nsImage).resizable().scaledToFit().frame(height: height).clipShape(RoundedRectangle(cornerRadius: 6))
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: contentW - 20, height: contentH)
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
             }
         }
         .padding(8)
-        .frame(maxWidth: 400, alignment: .leading)
+        .frame(width: popupW, height: popupH, alignment: .topLeading)
         .background(Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType))
         .cornerRadius(8)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.35), lineWidth: 1))
         .shadow(radius: 4)
-        .transition(.opacity)
         .zIndex(10)
-        .offset(x: frame.minX - 35, y: offsetY)
+        .offset(x: left, y: top)
+        .allowsHitTesting(false)
     }
 }
 
@@ -1852,25 +2829,39 @@ struct ThemePreview: View {
     var themeType: String
 
     var body: some View {
-        let popupHeight: CGFloat = height + 20
-        let windowContentFrame = NSApp.mainWindow?.contentView?.frame ?? .zero
-        let popupBottomY = frame.maxY
-        let offsetY: CGFloat = (popupBottomY + popupHeight > windowContentFrame.maxY) ? frame.minY - popupHeight - 145 : frame.minY + defaultYOffset
+        let win = tooltipHostWindow()
+        let contentScreen = win?.convertToScreen(win?.contentView?.bounds ?? .zero) ?? .zero
+
+        let popupW = width + 20
+        let popupH = height + 20
+
+        let localX = frame.minX - contentScreen.minX
+        let localY = frame.minY - contentScreen.minY
+
+        let desiredLeft = localX + 8
+        let desiredTop  = localY - popupH - 46
+
+        let left = max(8, min(desiredLeft, contentScreen.width - popupW - 8))
+        let top  = desiredTop
 
         return VStack(alignment: .leading, spacing: 8) {
-            if let imagePath = Bundle.main.path(forResource: imageName, ofType: imageName == "Megurine_Luka" ? "jpg" : "png"),
-               let nsImage = NSImage(contentsOfFile: imagePath) {
-                Image(nsImage: nsImage).resizable().scaledToFit().frame(width: width, height: height).clipShape(RoundedRectangle(cornerRadius: 8))
+            if let path = Bundle.main.path(forResource: imageName, ofType: imageName == "Megurine_Luka" ? "jpg" : "png"),
+               let nsImage = NSImage(contentsOfFile: path) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: width, height: height)
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
             }
         }
         .padding(8)
-        .frame(maxWidth: width + 20, alignment: .leading)
+        .frame(width: popupW, height: popupH, alignment: .topLeading)
         .background(Color.tooltipBackground(customThemeEnabled: customThemeEnabled, themeType: themeType))
         .cornerRadius(8)
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.4)))
+        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.gray.opacity(0.35), lineWidth: 1))
         .shadow(radius: 4)
-        .transition(.opacity)
         .zIndex(10)
-        .offset(x: frame.minX - 60, y: offsetY)
+        .offset(x: left, y: top)
+        .allowsHitTesting(false)
     }
 }
