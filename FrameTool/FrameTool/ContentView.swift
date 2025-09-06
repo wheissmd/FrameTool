@@ -314,6 +314,8 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var showQueue = false
     @State private var queueItems: [QueueItem] = []
+    
+    
 
     var themeArtAttribution: String {
         if config.app.useCustomTheme && config.app.theme == .miku {
@@ -426,12 +428,24 @@ struct ContentView: View {
                 .padding(.horizontal)
 
                 ZStack {
+                    let locked = !queueItems.isEmpty
+
                     RoundedRectangle(cornerRadius: 10)
-                        .strokeBorder(style: StrokeStyle(lineWidth: 2, dash: [5]))
+                        .strokeBorder(
+                            locked ? Color.gray.opacity(0.5) : Color.blue,
+                            style: StrokeStyle(lineWidth: 2, dash: [5])
+                        )
                         .frame(height: 120)
-                        .foregroundColor(.blue)
-                        .overlay(Text(droppedFilePath ?? "Drop your video file here").foregroundColor(.gray))
+                        .overlay(
+                            Text(
+                                locked
+                                ? "Render Queue is in use. To do fast analysis empty the Render Queue first."
+                                : (droppedFilePath ?? "Drop your video file here")
+                            )
+                            .foregroundColor(.gray)   // <- always gray, regardless of theme
+                        )
                         .onDrop(of: ["public.file-url"], isTargeted: nil) { providers in
+                            guard !locked else { return false }
                             if let provider = providers.first {
                                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
                                     DispatchQueue.main.async { self.droppedFilePath = url?.path }
@@ -440,8 +454,11 @@ struct ContentView: View {
                             }
                             return false
                         }
+                        .allowsHitTesting(!locked)
+                        .animation(.easeInOut(duration: 0.2), value: locked)
                 }
                 .padding(.horizontal)
+
 
                 Button(action: { runAnalysis() }) {
                     Text("Run Analysis").foregroundColor(config.app.useCustomTheme && (config.app.theme == .miku || config.app.theme == .luka) ? .black : .primary)
@@ -657,13 +674,25 @@ struct PerItemOutputEditor: View {
     @State private var draft: OutputSettings = .init()
     @State private var fileNameEdited = false
     @State private var isPriming = true
+    @State private var itemID: UUID?
+    @State private var timer = Timer.publish(every: 0.25, on: .main, in: .common).autoconnect()
+    @State private var lastIndex: Int?
+
+
+    private var liveIndex: Int? {
+        guard let id = itemID else { return nil }
+        return items.firstIndex(where: { $0.id == id })
+    }
 
     var body: some View {
-        VStack(spacing: 16) {
-            Text(items[itemIndex].url.lastPathComponent)
-                .font(.headline)
-                .lineLimit(1)
-                .truncationMode(.middle)
+        let idx = liveIndex ?? itemIndex
+        return VStack(spacing: 16) {
+            if items.indices.contains(idx) {
+                Text(items[idx].url.lastPathComponent)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
 
             Divider()
 
@@ -675,23 +704,32 @@ struct PerItemOutputEditor: View {
                              (useCustomTheme && themeType.lowercased().contains("light")) ? .light :
                              (NSApp.effectiveAppearance.name == .darkAqua ? .dark : .light),
                 onFileNameEdited: {
-                    fileNameEdited = true
-                    items[itemIndex].fileNameEdited = true
-                    markOverridden()
+                    let idx = liveIndex ?? itemIndex
+                    if items.indices.contains(idx) {
+                        let expected = "\(globalOutput.fileName)-\(idx + 1)"
+                        let editedNow = draft.fileName != expected
+                        fileNameEdited = editedNow
+                        items[idx].fileNameEdited = editedNow
+                        markOverridden()
+                    }
                 }
             )
             .frame(width: 600)
+
 
             Spacer(minLength: 0)
 
             HStack {
                 Button("Reset to defaults") {
-                    items[itemIndex].perItemOutput = nil
-                    items[itemIndex].fileNameEdited = false
-                    draft = globalOutput
-                    draft.fileName = "\(globalOutput.fileName)-\(itemIndex + 1)"
-                    items[itemIndex].hasOverrides = false
-                    QueueStore.save(items)
+                    let idx = liveIndex ?? itemIndex
+                    if items.indices.contains(idx) {
+                        items[idx].perItemOutput = nil
+                        items[idx].fileNameEdited = false
+                        draft = globalOutput
+                        draft.fileName = "\(globalOutput.fileName)-\(idx + 1)"
+                        items[idx].hasOverrides = false
+                        QueueStore.save(items)
+                    }
                 }
                 Spacer()
                 Button("Close") { NSApp.keyWindow?.close() }
@@ -700,31 +738,78 @@ struct PerItemOutputEditor: View {
         }
         .padding(20)
         .onAppear {
-            draft = items[itemIndex].perItemOutput ?? globalOutput
-            fileNameEdited = items[itemIndex].fileNameEdited
-            if !fileNameEdited {
-                draft.fileName = "\(globalOutput.fileName)-\(itemIndex + 1)"
+            if itemID == nil, items.indices.contains(itemIndex) {
+                itemID = items[itemIndex].id
+            }
+            let idx = liveIndex ?? itemIndex
+            if items.indices.contains(idx) {
+                draft = items[idx].perItemOutput ?? globalOutput
+                fileNameEdited = items[idx].fileNameEdited
+                if !fileNameEdited {
+                    draft.fileName = "\(globalOutput.fileName)-\(idx + 1)"
+                }
+                lastIndex = idx
             }
             isPriming = false
         }
+
+
         .onChange(of: draft) { _ in
             if !isPriming { markOverridden() }
         }
+        .onChange(of: draft.fileName) { _ in
+            let idx = liveIndex ?? itemIndex
+            if items.indices.contains(idx) {
+                let expected = "\(globalOutput.fileName)-\(idx + 1)"
+                let editedNow = draft.fileName != expected
+                fileNameEdited = editedNow
+                items[idx].fileNameEdited = editedNow
+                markOverridden()
+            }
+        }
+        .onChange(of: globalOutput) { _ in
+            markOverridden()
+        }
+        .onChange(of: items.map { $0.id }) { _ in
+            let newIdx = liveIndex ?? itemIndex
+            guard items.indices.contains(newIdx) else { return }
+            let oldIdx = lastIndex ?? newIdx
+            let oldExpected = "\(globalOutput.fileName)-\(oldIdx + 1)"
+            let newExpected = "\(globalOutput.fileName)-\(newIdx + 1)"
+
+            if draft.fileName == oldExpected {
+                draft.fileName = newExpected
+            }
+            if var per = items[newIdx].perItemOutput, per.fileName == oldExpected {
+                per.fileName = newExpected
+                items[newIdx].perItemOutput = per
+            }
+            lastIndex = newIdx
+            markOverridden()
+        }
+
+        .onReceive(timer) { _ in
+            if !isPriming { markOverridden() }
+        }
+
     }
 
     private func markOverridden() {
-        var compare = draft
-        if !fileNameEdited { compare.fileName = globalOutput.fileName }
-        if compare == globalOutput && fileNameEdited == false {
-            items[itemIndex].perItemOutput = nil
-            items[itemIndex].hasOverrides = false
-        } else {
-            items[itemIndex].perItemOutput = draft
-            items[itemIndex].hasOverrides = true
-        }
+        let idx = liveIndex ?? itemIndex
+        guard items.indices.contains(idx) else { return }
+        let expected = "\(globalOutput.fileName)-\(idx + 1)"
+        var a = draft
+        var b = globalOutput
+        b.fileName = expected
+        if a.fileName == expected { a.fileName = expected }
+        let matches = (a == b)
+        items[idx].hasOverrides = !matches
+        items[idx].perItemOutput = matches ? nil : draft
         QueueStore.save(items)
     }
+
 }
+
 
 // MARK: - Reusable Output Tab for queue
 
@@ -1160,6 +1245,26 @@ struct QueuePopup: View {
     @State private var draggingItem: QueueItem?
     
     @State private var isDropTarget = false
+    
+    private func recomputeOverrides() {
+        for idx in items.indices {
+            let edited = items[idx].fileNameEdited
+            let dynamicName = "\(globalOutput.fileName)-\(idx + 1)"
+            var draft = items[idx].perItemOutput ?? globalOutput
+            var a = draft
+            var b = globalOutput
+            if !edited {
+                a.fileName = dynamicName
+                b.fileName = dynamicName
+            }
+            let match = (a == b)
+            let isOverridden = !match || edited
+            items[idx].hasOverrides = isOverridden
+            items[idx].perItemOutput = isOverridden ? draft : nil
+        }
+        QueueStore.save(items)
+    }
+
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -1355,6 +1460,9 @@ struct QueuePopup: View {
               .font(.caption2)
               .foregroundStyle(.secondary)
         }
+        .onChange(of: items.map { $0.id }) { _ in
+                    recomputeOverrides()
+                }
     }
 
     // Row
@@ -1424,17 +1532,20 @@ struct QueuePopup: View {
                 .map { QueueItem(url: $0) }
             if !newItems.isEmpty {
                 items.append(contentsOf: newItems)
+                recomputeOverrides()
             }
         }
-        
     }
+
     
 
     private func remove(_ item: QueueItem) {
         if let idx = items.firstIndex(of: item) {
             items.remove(at: idx)
+            recomputeOverrides()
         }
     }
+
 
     private func openItemSettings(_ item: QueueItem) {
         guard let idx = items.firstIndex(of: item) else { return }
@@ -1474,6 +1585,25 @@ struct QueueItem: Identifiable, Codable, Equatable {
 // MARK: - Per-item Output Settings Window (match app theme)
 
 fileprivate let SettingsContentWidth: CGFloat = 600
+struct PerItemEditorByID: View {
+    let itemID: UUID
+    @Binding var items: [QueueItem]
+    @Binding var globalOutput: OutputSettings
+    var useCustomTheme: Bool
+    var themeType: String
+
+    var body: some View {
+        let idx = items.firstIndex(where: { $0.id == itemID }) ?? 0
+        return PerItemOutputEditor(
+            itemIndex: idx,
+            items: $items,
+            globalOutput: $globalOutput,
+            useCustomTheme: useCustomTheme,
+            themeType: themeType
+        )
+    }
+}
+
 final class PerItemSettingsWindowController: NSWindowController {
     private var hosting: NSHostingController<AnyView>!
 
@@ -1483,8 +1613,11 @@ final class PerItemSettingsWindowController: NSWindowController {
          useCustomTheme: Bool,
          themeType: String) {
 
-        let editor = PerItemOutputEditor(
-            itemIndex: itemIndex,
+        let initialItems = itemsBinding.wrappedValue
+        let itemID = initialItems.indices.contains(itemIndex) ? initialItems[itemIndex].id : UUID()
+
+        let editorByID = PerItemEditorByID(
+            itemID: itemID,
             items: itemsBinding,
             globalOutput: globalOutputBinding,
             useCustomTheme: useCustomTheme,
@@ -1492,8 +1625,8 @@ final class PerItemSettingsWindowController: NSWindowController {
         )
 
         let rootView: AnyView = useCustomTheme
-        ? AnyView(editor.preferredColorScheme(.dark))
-        : AnyView(editor)
+        ? AnyView(editorByID.preferredColorScheme(.dark))
+        : AnyView(editorByID)
 
         hosting = NSHostingController(rootView: rootView)
 
@@ -1536,6 +1669,7 @@ final class PerItemSettingsWindowController: NSWindowController {
 
     required init?(coder: NSCoder) { fatalError() }
 }
+
 
 
 
@@ -1676,6 +1810,7 @@ struct SettingsPopup: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+            
             
             .padding()
             .overlay(alignment: .topLeading) { tooltipsOverlay }
