@@ -1,7 +1,9 @@
-//  FrameAnalyzer.swift
+//
+//  QueueAnalyzer.swift
 //  FrameTool
 //
-//  Created by wheissmd on 17/04/2025.
+//  Created by Denis Vays on 06/09/2025.
+//
 
 import AVFoundation
 import CoreImage
@@ -11,16 +13,7 @@ import CoreText
 import Foundation
 import MachO
 
-extension vImage_Buffer {
-    func deepCopy() -> vImage_Buffer {
-        var newBuffer = vImage_Buffer()
-        vImageBuffer_Init(&newBuffer, self.height, self.width, 8, vImage_Flags(kvImageNoFlags))
-        memcpy(newBuffer.data, self.data, Int(self.height) * self.rowBytes)
-        return newBuffer
-    }
-}
-
-public struct FrameAnalyzer {
+public struct QueueAnalyzer {
     /// Main method to analyze frame timings in a video.
     /// - Parameters:
     ///   - videoPath: path to the input video file
@@ -37,29 +30,37 @@ public struct FrameAnalyzer {
     
     
     
-    public static func runAnalysis(
+    static func runAnalysis(
         videoPath: String,
-        outputPath: String,
-        baseFileName: String,
-        exportCsvFrametimes: Bool,
-        isMultithreading: Bool,
-        reportStats: Bool,
-        statsMode: String,
-        exportImage: Bool,
-        exportInteractive: Bool,
-        exportAnimated: Bool,
-        detectTearing: Bool = false,
-        userGraphScale: CGFloat,
-        renderOneSideOnly: Bool,
-        overlayPosition: String,
-        response250msEnabled: Bool,
-        graphColorHex: String,
+        indexInQueue: Int,
+        outputSettings: OutputSettings,
+        commonOutputPath: String,
+        multithreadingEnabled: Bool,
         mtChunkSize: Int,
         codec: String,
         onComplete: @escaping (String) -> Void = { _ in }
     ) -> String {
 
+
         
+        let outputPath = commonOutputPath
+        let baseFileName = outputSettings.fileName
+        let exportCsvFrametimes = outputSettings.exportCsvFrametimes
+        let isMultithreading = multithreadingEnabled
+        let reportStats = outputSettings.exportCsvSummary
+        let statsMode = outputSettings.csvSummaryMode.rawValue
+        let exportImage = outputSettings.exportImage
+        let exportInteractive = outputSettings.exportInteractive
+        let exportAnimated = outputSettings.exportAnimated
+        let detectTearing = outputSettings.tearingDetection
+        let userGraphScale = outputSettings.overlayScale
+        let renderOneSideOnly = outputSettings.renderOneSideOnly
+        let overlayPosition = outputSettings.overlayPosition.rawValue
+        let response250msEnabled = outputSettings.enable250ms
+        let graphColorHex = outputSettings.graphColorHex
+        _ = indexInQueue
+
+
         
             let bucketSize = response250msEnabled ? 0.25 : 1.0
             let chosenNSColor: NSColor = {
@@ -586,10 +587,8 @@ public struct FrameAnalyzer {
         
             
             
-        log(" ")
-        log("📊 Average FPS: \(String(format: "%.2f", avgFPS))")
-        log("📊 Min FPS: \(String(format: "%.2f", minFPS))")
-        log("📊 Max FPS: \(String(format: "%.2f", maxFPS))")
+        let compactLine = "\(indexInQueue): ✅  Processed \(frameTimes.count) frames 📊 FPS Avg: \(String(format: "%.2f", avgFPS)), Min: \(String(format: "%.2f", minFPS)), Max: \(String(format: "%.2f", maxFPS))"
+
         
         // Write results to CSV file
         var statBlock: [String] = []
@@ -1142,15 +1141,15 @@ public struct FrameAnalyzer {
                                     if overlayReader.status == .completed {
                                         writerInput.markAsFinished()
                                         writer.finishWriting {
-                                            onComplete(outputLog)
+                                            onComplete(compactLine)
                                         }
                                     } else if overlayReader.status == .failed {
                                         log("❌ OverlayReader error: \(overlayReader.error?.localizedDescription ?? "Unknown error")")
-                                        onComplete(outputLog)
+                                        onComplete(compactLine)
                                     } else {
                                         writerInput.markAsFinished()
                                         writer.finishWriting {
-                                            onComplete(outputLog)
+                                            onComplete(compactLine)
                                         }
                                     }
                                     return
@@ -1426,7 +1425,7 @@ public struct FrameAnalyzer {
                         if frameCount >= totalFramesToWrite {
                             writerInput.markAsFinished()
                             writer.finishWriting {
-                                onComplete(outputLog)
+                                onComplete(compactLine)
                             }
                         }
                     }
@@ -1464,16 +1463,11 @@ public struct FrameAnalyzer {
             }
         }
             
-            log(" ")
-            log("📁 Saved outputs to: \(outDirURL)")
-            log("📁 Using video file: \(videoPath)")
-            log(" ")
-            log("⚠️ WARNING: This is the alpha version, it may have bugs and provides false positives if fed with video full of screen tearing!")
-            
-            if !exportAnimated {
-                onComplete(outputLog)
-                    return outputLog
-                }
+        if !exportAnimated {
+            onComplete(compactLine)
+            return compactLine
+        }
+
             
         
         
@@ -1522,11 +1516,11 @@ public struct FrameAnalyzer {
                 if writer.status == .writing {
                     writerInput.markAsFinished()
                     writer.finishWriting {
-                        onComplete(outputLog)
+                        onComplete(compactLine)
                     }
                 } else {
                     print("⚠️ Tried to finish writing but writer was not in .writing state (status: \(writer.status.rawValue))")
-                    onComplete(outputLog)
+                    onComplete(compactLine)
                 }
             }
 
