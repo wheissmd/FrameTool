@@ -9,9 +9,14 @@ import SwiftUI
 
 @main
 struct FrameToolApp: App {
-    var body: some Scene {
-        WindowGroup {
-            ContentView()
+    init() {
+            _ = QueueStore.purgeIfFirstLaunch()
         }
+    var body: some Scene {
+        Window("Frame Tool", id: "main") {
+            ContentView()
+                .frame(width: 900, height: 780)
+        }
+        .windowResizability(.contentSize)
     }
 }
